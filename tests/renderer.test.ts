@@ -52,3 +52,17 @@ describe("renderer", () => {
     expect(toHtml(root)).toContain("&lt;b&gt;&amp;");
   });
 });
+
+describe("main components", () => {
+  it("render with their default props applied", () => {
+    const component: Record<string, DesignNode> = {
+      c: {
+        type: "frame",
+        component: { props: { icon: { type: "boolean", default: false, overrides: { false: { ic: { hidden: true } } } } } },
+      },
+      ic: { type: "icon", set: "lucide", icon: "lock", parentId: "c", index: "a0" },
+    };
+    const { root } = buildRenderTree({ nodes: component, rootId: "c", tokens, iconSvg: () => "<svg></svg>" });
+    expect(toHtml(root)).toMatch(/data-node-id="ic"[^>]*display: none/);
+  });
+});

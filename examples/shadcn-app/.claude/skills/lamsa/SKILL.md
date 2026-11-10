@@ -74,6 +74,7 @@ Use it with `{ "type": "instance", "componentId": "Bt9xQ2mL", "props": { "varian
 | `lamsa validate` / `lamsa fmt [--fix]` | Check; normalise (flatten nested input, fill indexes, sort keys; `--fix` drops orphans) |
 | `lamsa render [targets] [--mode dark] [--scale 2] [--out dir]` | PNGs of top-level frames |
 | `lamsa diff [ref]` | Semantic changes since a git ref and the screens they affect |
+| `lamsa report [--base ref]` | Before/after PNGs of affected screens plus a markdown summary (`.lamsa/report/report.md`) |
 | `lamsa selection` | What the user has selected in the editor |
 | `lamsa open [file] [--select id]` | Show the user (optional) |
 

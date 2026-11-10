@@ -5,6 +5,7 @@ import { fmtCommand, validateCommand } from "./commands/check.js";
 import { addCommand, deleteCommand, moveCommand, splitCommand } from "./commands/edit.js";
 import { componentsCommand, diffCommand, selectionCommand, tokensCommand, treeCommand } from "./commands/read.js";
 import { renderCommand } from "./commands/render.js";
+import { reportCommand } from "./commands/report.js";
 import { initCommand, migrateCommand, openCommand, schemaCommand, skillCommand } from "./commands/setup.js";
 import { createOutput } from "./output.js";
 
@@ -109,6 +110,17 @@ program
   .command("diff [ref]")
   .description("semantic design changes since a git ref (default HEAD)")
   .action((ref: string | undefined) => run(() => diffCommand({ out: out(), ref: ref ?? "HEAD" })));
+
+program
+  .command("report")
+  .description("before/after renders and a markdown summary of design changes since a git ref (for PRs)")
+  .option("--base <ref>", "git ref to compare against", "origin/main")
+  .option("--out <dir>", "output directory", ".lamsa/report")
+  .option("--image-base-url <url>", "prefix for image links in report.md")
+  .option("--scale <n>", "device scale factor", (v) => Number.parseFloat(v), 2)
+  .action((o) =>
+    run(() => reportCommand({ out: out(), base: o.base, outDir: o.out, imageBaseUrl: o.imageBaseUrl, scale: o.scale })),
+  );
 
 program
   .command("selection")

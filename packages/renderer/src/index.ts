@@ -120,7 +120,7 @@ function mergePatch(into: Map<string, NodePatch>, patches: Record<string, NodePa
   }
 }
 
-function instancePatches(instance: InstanceNode, component: DesignNode): Map<string, NodePatch> {
+export function instancePatches(instance: InstanceNode, component: DesignNode): Map<string, NodePatch> {
   const patches = new Map<string, NodePatch>();
   if (component.type !== "frame" || !component.component) return patches;
   for (const [name, def] of Object.entries(component.component.props ?? {})) {
@@ -140,7 +140,7 @@ function instancePatches(instance: InstanceNode, component: DesignNode): Map<str
   return patches;
 }
 
-function applyPatch(node: DesignNode, patch: NodePatch | undefined): DesignNode {
+export function applyPatch(node: DesignNode, patch: NodePatch | undefined): DesignNode {
   if (!patch) return node;
   const next = { ...node, style: { ...node.style, ...patch.style } } as DesignNode;
   if (patch.hidden !== undefined) next.hidden = patch.hidden;
@@ -300,7 +300,23 @@ export function buildRenderTree(options: RenderOptions): RenderResult {
     children: childMap(options.nodes),
     depth: 0,
   };
-  const root = renderNode({ id: options.rootId, displayId: options.rootId, node, context, isRoot: true });
+  let root: RenderElement;
+  if (node.type === "frame" && node.component) {
+    const defaults = instancePatches({ type: "instance", componentId: options.rootId }, node);
+    const own = applyPatch(node, defaults.get(options.rootId));
+    root = renderFrameLike({
+      id: options.rootId,
+      displayId: options.rootId,
+      node: own,
+      context,
+      patches: defaults,
+      prefix: undefined,
+      isRoot: true,
+      nodeType: "frame",
+    });
+  } else {
+    root = renderNode({ id: options.rootId, displayId: options.rootId, node, context, isRoot: true });
+  }
   const frameMode = node.type === "frame" ? node.mode : undefined;
   const mode = options.mode ?? frameMode ?? options.canvasMode ?? "light";
   if (options.mode) root.className = options.mode;

@@ -1,0 +1,82 @@
+name: lamsa PR preview
+description: Render before/after images of changed lamsa designs and post them, with a semantic diff, as a pull request comment.
+branding:
+  icon: image
+  color: orange
+inputs:
+  working-directory:
+    description: Directory containing lamsa.config.json
+    default: "."
+  base:
+    description: Git ref to compare against
+    default: ${{ github.event.pull_request.base.sha }}
+  lamsa-version:
+    description: npm version of the lamsa CLI
+    default: latest
+  previews-branch:
+    description: Branch that stores rendered images (created if missing)
+    default: lamsa-previews
+  github-token:
+    description: Token with contents:write and pull-requests:write
+    default: ${{ github.token }}
+outputs:
+  report:
+    description: Path to the generated report.md
+    value: ${{ steps.report.outputs.report }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - id: report
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BASE: ${{ inputs.base }}
+        VERSION: ${{ inputs.lamsa-version }}
+        BRANCH: ${{ inputs.previews-branch }}
+        PR: ${{ github.event.pull_request.number }}
+        SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        out="$RUNNER_TEMP/lamsa-report"
+        npx --yes "lamsa@${VERSION}" report --base "$BASE" --out "$out" \
+          --image-base-url "https://github.com/${REPO}/raw/${BRANCH}/pr-${PR}/${SHA}"
+        echo "report=$out/report.md" >> "$GITHUB_OUTPUT"
+        echo "dir=$out" >> "$GITHUB_OUTPUT"
+
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        BRANCH: ${{ inputs.previews-branch }}
+        PR: ${{ github.event.pull_request.number }}
+        SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        REPO: ${{ github.repository }}
+        DIR: ${{ steps.report.outputs.dir }}
+      run: |
+        set -euo pipefail
+        if ls "$DIR"/*.png >/dev/null 2>&1; then
+          store="$RUNNER_TEMP/lamsa-previews"
+          git clone --quiet --depth 1 --branch "$BRANCH" "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$store" 2>/dev/null || {
+            mkdir -p "$store" && cd "$store" && git init --quiet && git checkout --quiet --orphan "$BRANCH"
+            git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          }
+          cd "$store"
+          mkdir -p "pr-${PR}/${SHA}"
+          cp "$DIR"/*.png "pr-${PR}/${SHA}/"
+          git add -A
+          git -c user.name="lamsa" -c user.email="lamsa@users.noreply.github.com" commit --quiet -m "Previews for #${PR} at ${SHA}"
+          git push --quiet origin "HEAD:${BRANCH}"
+        fi
+
+        body="$DIR/report.md"
+        existing=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+          --jq '[.[] | select(.body | startswith("<!-- lamsa-report -->"))][0].id // empty')
+        if [ -n "$existing" ]; then
+          gh api --method PATCH "repos/${REPO}/issues/comments/${existing}" -F "body=@${body}" >/dev/null
+        else
+          gh api --method POST "repos/${REPO}/issues/${PR}/comments" -F "body=@${body}" >/dev/null
+        fi

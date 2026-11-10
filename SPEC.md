@@ -102,6 +102,7 @@ Command surface (hybrid):
 | Read views | `tree`, `diff`, `components`, `tokens`, `selection` |
 | Setup / upkeep | `init`, `migrate` |
 | Show the user | `open` (optional; launches or focuses the desktop app) |
+| Review | `report` (before/after PNGs of affected screens + markdown summary; the GitHub Action wraps it) |
 
 Simple property tweaks are raw JSON edits; raw edits are first-class.
 
@@ -147,7 +148,7 @@ Before launch: confirm the embedded-terminal approach is consistent with agent v
 
 ## Pull request review
 
-An opt-in GitHub Action posts before/after PNGs and a semantic diff (nodes added/removed/changed) on PRs. It re-renders every screen that depends on a changed component.
+An opt-in GitHub Action (`action/`) posts before/after PNGs and a semantic diff (nodes added/removed/changed) on PRs. It re-renders every screen that depends on a changed component. It is a thin wrapper over `lamsa report`, so the same review runs locally; images go to a separate `lamsa-previews` branch and the comment updates in place on each push.
 
 ## Stack
 
