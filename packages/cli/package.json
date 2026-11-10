@@ -1,0 +1,25 @@
+{
+  "name": "lamsa",
+  "version": "0.1.0",
+  "description": "Local-first design files for apps, driven by your own coding agent",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "lamsa": "./dist/cli.js" },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "files": ["dist", "skill"],
+  "scripts": {
+    "build": "tsup src/cli.ts src/index.ts --format esm --dts --clean",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@lamsa/core": "workspace:*",
+    "@lamsa/renderer": "workspace:*",
+    "@lamsa/schema": "workspace:*",
+    "commander": "^14.0.0",
+    "playwright-core": "^1.65.0"
+  }
+}

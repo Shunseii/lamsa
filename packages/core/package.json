@@ -1,0 +1,30 @@
+{
+  "name": "@lamsa/core",
+  "version": "0.1.0",
+  "description": "Read, validate, format and edit lamsa design files",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@lamsa/schema": "workspace:*",
+    "fractional-indexing": "^3.2.0",
+    "nanoid": "^5.1.0",
+    "postcss": "^8.5.0",
+    "tinyglobby": "^0.2.10",
+    "lucide-static": "^1.71.0"
+  }
+}

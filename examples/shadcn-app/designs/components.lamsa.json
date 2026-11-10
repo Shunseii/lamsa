@@ -1,0 +1,149 @@
+{
+  "$schema": "https://lamsa.dev/schema/v1.json",
+  "nodes": {
+    "Btn00001": {
+      "component": {
+        "props": {
+          "icon": {
+            "default": false,
+            "overrides": {
+              "false": {
+                "BtnIcon1": {
+                  "hidden": true
+                }
+              }
+            },
+            "type": "boolean"
+          },
+          "label": {
+            "default": "Button",
+            "target": "BtnLabel",
+            "type": "text"
+          },
+          "variant": {
+            "default": "default",
+            "options": [
+              "default",
+              "outline",
+              "ghost"
+            ],
+            "overrides": {
+              "ghost": {
+                "Btn00001": {
+                  "style": {
+                    "background": "transparent",
+                    "color": "{color.foreground}"
+                  }
+                }
+              },
+              "outline": {
+                "Btn00001": {
+                  "style": {
+                    "background": "{color.background}",
+                    "border": "1px solid {color.border}",
+                    "color": "{color.foreground}"
+                  }
+                }
+              }
+            },
+            "type": "enum"
+          }
+        }
+      },
+      "index": "a0",
+      "name": "Button",
+      "style": {
+        "align-items": "center",
+        "background": "{color.primary}",
+        "border-radius": "{radius.md}",
+        "color": "{color.primary-foreground}",
+        "display": "inline-flex",
+        "font-size": 14,
+        "font-weight": 500,
+        "gap": "{spacing.2}",
+        "height": 36,
+        "justify-content": "center",
+        "padding": "0 {spacing.4}"
+      },
+      "type": "frame",
+      "x": 0,
+      "y": 0
+    },
+    "BtnIcon1": {
+      "icon": "lock",
+      "index": "a0",
+      "parentId": "Btn00001",
+      "set": "lucide",
+      "style": {
+        "height": 16,
+        "width": 16
+      },
+      "type": "icon"
+    },
+    "BtnLabel": {
+      "content": "Button",
+      "index": "a1",
+      "parentId": "Btn00001",
+      "type": "text"
+    },
+    "Inp00001": {
+      "component": {
+        "props": {
+          "label": {
+            "default": "Label",
+            "target": "InpLabel",
+            "type": "text"
+          },
+          "value": {
+            "default": "",
+            "target": "InpValue",
+            "type": "text"
+          }
+        }
+      },
+      "index": "a1",
+      "name": "Input",
+      "style": {
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": "{spacing.1.5}",
+        "width": 300
+      },
+      "type": "frame",
+      "x": 480,
+      "y": 0
+    },
+    "InpField": {
+      "index": "a1",
+      "parentId": "Inp00001",
+      "style": {
+        "align-items": "center",
+        "background": "{color.background}",
+        "border": "1px solid {color.input}",
+        "border-radius": "{radius.md}",
+        "display": "flex",
+        "font-size": 14,
+        "height": 36,
+        "padding": "0 {spacing.3}"
+      },
+      "type": "frame"
+    },
+    "InpLabel": {
+      "content": "Label",
+      "index": "a0",
+      "parentId": "Inp00001",
+      "style": {
+        "font-size": 14,
+        "font-weight": 500
+      },
+      "type": "text"
+    },
+    "InpValue": {
+      "content": "",
+      "index": "a0",
+      "parentId": "InpField",
+      "type": "text"
+    }
+  },
+  "version": 1
+}

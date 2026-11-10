@@ -45,9 +45,9 @@ See [Competitors](#competitors) at the end.
 
 ### Node types
 
-lamsa's own framework-agnostic primitives (frame, text, rect/shape, image, icon, instance). It does not render the app's real components.
+lamsa's own framework-agnostic primitives: `frame` (also used for rectangles and shapes), `text`, `image`, `icon`, `instance`. It does not render the app's real components.
 
-**Icons** are a node type: `{ "type": "icon", "set": "lucide", "name": "lock" }`, sized and coloured with CSS (`width`, `color`). The renderer bundles a pinned lucide version. Other icon sets come later (adapter or plugin; reading the app's installed lucide version is a candidate). Custom icons are image nodes pointing at an SVG file.
+**Icons** are a node type: `{ "type": "icon", "set": "lucide", "icon": "lock" }` (the field is `icon` because `name` is the layer name), sized and coloured with CSS (`width`, `color`). The renderer bundles a pinned lucide version. Other icon sets come later (adapter or plugin; reading the app's installed lucide version is a candidate). Custom icons are image nodes pointing at an SVG file.
 
 In scope: flex/grid layout, absolute positioning, rotation, shadows, blur, blend modes, masks/clip, gradients, image fills.
 Out of scope: pen tool, boolean operations, anything CSS can't render.

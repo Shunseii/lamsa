@@ -1,0 +1,26 @@
+{
+  "name": "lamsa-monorepo",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.18.0",
+  "scripts": {
+    "build": "pnpm -r --filter './packages/*' build",
+    "test": "vitest run",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^9.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.1.0",
+    "@lamsa/core": "workspace:*",
+    "@lamsa/renderer": "workspace:*",
+    "@lamsa/schema": "workspace:*"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "electron"
+    ]
+  }
+}

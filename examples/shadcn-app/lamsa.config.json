@@ -1,0 +1,22 @@
+{
+  "agent": {
+    "args": [],
+    "command": "claude"
+  },
+  "assetsDir": "designs/assets",
+  "designs": [
+    "designs/**/*.lamsa.json"
+  ],
+  "fonts": {
+    "--font-geist-mono": {
+      "google": "Geist Mono"
+    },
+    "--font-geist-sans": {
+      "google": "Geist"
+    }
+  },
+  "tokens": {
+    "adapter": "shadcn-tailwind4",
+    "path": "app/globals.css"
+  }
+}
