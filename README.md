@@ -27,3 +27,16 @@ pnpm test
 ```
 
 MIT licensed.
+
+## Packages
+
+| Path | What |
+|---|---|
+| `packages/schema` | `@lamsa/schema`: types and the JSON Schema |
+| `packages/core` | `@lamsa/core`: load, validate, fmt, edit, diff, token adapters |
+| `packages/renderer` | `@lamsa/renderer`: design JSON → DOM/CSS (editor and exports) |
+| `packages/cli` | `lamsa`: the CLI and the agent skill |
+| `apps/desktop` | Electron editor (`pnpm desktop`, or `lamsa open` with `lamsa-desktop` on PATH / `LAMSA_DESKTOP_BIN`) |
+| `action` | GitHub Action for PR previews |
+
+`pnpm test` builds everything and runs unit, CLI and desktop end-to-end tests (the editor runs offscreen, no display needed).

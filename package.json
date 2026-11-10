@@ -4,9 +4,11 @@
   "type": "module",
   "packageManager": "pnpm@10.18.0",
   "scripts": {
-    "build": "pnpm -r --filter './packages/*' build",
-    "test": "vitest run",
-    "typecheck": "pnpm -r typecheck"
+    "build": "pnpm -r build",
+    "test": "pnpm build && vitest run",
+    "test:unit": "vitest run tests/core.test.ts tests/renderer.test.ts tests/cli.test.ts",
+    "typecheck": "pnpm -r typecheck",
+    "desktop": "pnpm --filter @lamsa/desktop dev"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -15,7 +17,8 @@
     "vitest": "^5.1.0",
     "@lamsa/core": "workspace:*",
     "@lamsa/renderer": "workspace:*",
-    "@lamsa/schema": "workspace:*"
+    "@lamsa/schema": "workspace:*",
+    "playwright-core": "^1.65.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

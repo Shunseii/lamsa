@@ -172,9 +172,9 @@ export async function openCommand({
       "install it, or set LAMSA_DESKTOP_BIN; everything else works without it (use `lamsa render` to look at designs)",
     );
   }
-  const args = ["--root", root];
-  if (file) args.push("--file", toRepoPath(root, file));
-  if (select) args.push("--select", select);
+  const args = [`--root=${root}`];
+  if (file) args.push(`--file=${toRepoPath(root, file)}`);
+  if (select) args.push(`--select=${select}`);
   const child = spawn(app, args, { detached: true, stdio: "ignore" });
   child.unref();
   out.result({ ok: true, app, args }, () => `opened lamsa${file ? ` on ${file}` : ""}${select ? ` with ${select} selected` : ""}`);
