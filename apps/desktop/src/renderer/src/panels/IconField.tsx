@@ -3,11 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/store";
 import { AutocompleteInput, type Suggestion } from "./AutocompleteInput";
 import { Popover } from "./Popover";
+import { cn } from "../lib/cn";
 
 let namesRequest: Promise<string[]> | undefined;
 const svgs = new Map<string, string>();
 
-function useIconNames(): string[] {
+export function useIconNames(): string[] {
   const [names, setNames] = useState<string[]>([]);
   useEffect(() => {
     namesRequest ??= api().iconNames();
@@ -73,7 +74,7 @@ export function IconField({ value, onCommit }: { value: string; onCommit: (name:
   return (
     <div className="field">
       <span className="field-label">icon</span>
-      <div ref={control} className={`field-control ${open ? "is-open" : ""}`}>
+      <div ref={control} className={cn("field-control", { "is-open": open })}>
         <IconPreview svg={current} />
         <AutocompleteInput
           className="input mono"
@@ -106,7 +107,7 @@ export function IconField({ value, onCommit }: { value: string; onCommit: (name:
 
 const SHOWN = 150;
 
-function IconPicker({ names, current, onPick }: { names: string[]; current: string; onPick: (name: string) => void }) {
+export function IconPicker({ names, current, onPick }: { names: string[]; current: string; onPick: (name: string) => void }) {
   const [query, setQuery] = useState("");
   const matches = searchIcons(names, query);
   const shown = matches.slice(0, SHOWN);
@@ -125,7 +126,7 @@ function IconPicker({ names, current, onPick }: { names: string[]; current: stri
       />
       <div className="popover-list">
         {shown.map((name) => (
-          <button key={name} className={`menu-item ${name === current ? "is-active" : ""}`} onClick={() => onPick(name)}>
+          <button key={name} className={cn("menu-item", { "is-active": name === current })} onClick={() => onPick(name)}>
             <IconPreview svg={previews.get(name)} />
             <span className="mono">{name}</span>
           </button>

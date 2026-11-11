@@ -1,8 +1,9 @@
-import { MousePointer2, Move, Palette, Sun, Moon } from "lucide-react";
+import { MousePointer2, Move, Palette } from "lucide-react";
 import { useEditor } from "../lib/store";
+import { cn } from "../lib/cn";
 
 export function StatusBar() {
-  const { files, pending, snapshot, selection, model, canvasMode, lastError, issues } = useEditor();
+  const { files, pending, snapshot, selection, model, lastError, issues } = useEditor();
   const count = Object.keys(files).length;
   const invalid = Object.values(files).filter((f) => f.error).length;
   const errors = issues.filter((i) => i.severity === "error").length;
@@ -10,7 +11,7 @@ export function StatusBar() {
   const state = lastError ? "save failed" : pending > 0 ? "saving…" : "saved";
   return (
     <div className="bar bar-status" data-testid="status-bar">
-      <span className={`status-dot ${lastError || invalid ? "is-danger" : "is-ok"}`} />
+      <span className={cn("status-dot", lastError || invalid ? "is-danger" : "is-ok")} />
       <span>
         Watching {count} file{count === 1 ? "" : "s"} · {state}
         {invalid ? ` · ${invalid} invalid` : ""}
@@ -28,9 +29,6 @@ export function StatusBar() {
           <Move size={13} /> x {first.x ?? first.style?.left ?? 0} y {first.y ?? first.style?.top ?? 0}
         </span>
       )}
-      <span className="muted status-optional">
-        {canvasMode === "light" ? <Sun size={13} /> : <Moon size={13} />} {canvasMode}
-      </span>
     </div>
   );
 }

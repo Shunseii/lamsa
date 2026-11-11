@@ -1,9 +1,11 @@
 import type { DesignNode } from "@lamsa/schema";
 import { Component, CornerDownLeft, EyeOff, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { insertNodes, newId } from "../lib/edits";
 import { isComponent, nodeTitle } from "../lib/model";
 import { useEditor } from "../lib/store";
+import { cn } from "../lib/cn";
+import { useDismiss } from "./Popover";
 
 export async function insertInstance(componentId: string, props: Record<string, string | boolean> = {}) {
   const { model, selection, commit, select, files } = useEditor.getState();
@@ -41,13 +43,17 @@ export function ComponentPicker() {
   const target = selection[0] ? nodeTitle(selection[0], model.nodes[selection[0]]) : "the canvas";
   const definitions = active?.type === "frame" ? (active.component?.props ?? {}) : {};
 
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setPicker(false), [setPicker]);
+  useDismiss({ ref, anchor: document.querySelector<HTMLElement>('[data-tool="component"]'), onClose: close });
+
   const insert = () => {
     if (!activeId) return;
     void insertInstance(activeId, props).then(() => setPicker(false));
   };
 
   return (
-    <div className="picker" data-testid="component-picker" onKeyDown={(e) => e.key === "Escape" && setPicker(false)}>
+    <div ref={ref} className="picker" data-testid="component-picker">
       <label className="search">
         <Search size={14} />
         <input autoFocus placeholder={`Search ${all.length - hidden} components`} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && insert()} />
@@ -60,7 +66,7 @@ export function ComponentPicker() {
               {entries.map(([id, node]) => (
                 <button
                   key={id}
-                  className={`menu-item ${id === activeId ? "is-active" : ""}`}
+                  className={cn("menu-item", { "is-active": id === activeId })}
                   onClick={() => {
                     setActiveId(id);
                     setProps({});
@@ -92,7 +98,7 @@ export function ComponentPicker() {
                   {def.type === "enum" ? (
                     <div className="segmented small">
                       {def.options.map((option) => (
-                        <button key={option} className={(props[name] ?? def.default) === option ? "is-on" : ""} onClick={() => setProps({ ...props, [name]: option })}>
+                        <button key={option} className={cn({ "is-on": (props[name] ?? def.default) === option })} onClick={() => setProps({ ...props, [name]: option })}>
                           {option}
                         </button>
                       ))}

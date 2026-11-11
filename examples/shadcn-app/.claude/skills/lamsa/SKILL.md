@@ -39,8 +39,9 @@ Add `--json` to any command for machine-readable output. If the user has the edi
 - IDs are random 8-char strings, global across the repo. Never derive them from names. Omit `id` in `add --tree` input and the CLI assigns them.
 - Node types: `frame` (container; only frames have children), `text` (`content`), `image` (`src`, a repo-relative path), `icon` (`"set": "lucide"`, `"icon": "<lucide name>"`), `instance` (`componentId`, `props`, `overrides`).
 - `style` is CSS with kebab-case property names. Unitless numbers are px. No selectors, no `:hover`: states are component variants. If CSS can't express it, lamsa can't either.
-- Token references go in style values: `"{color.primary}"`, `"1px solid {color.border}"`. Tokens come from the app's own CSS; `lamsa tokens` lists them. Don't invent tokens and don't copy raw hex values that a token already covers (validate warns).
+- Token references go in style values: `"{color.primary}"`, `"1px solid {color.border}"`. Tokens come from the app's own CSS, plus Tailwind's built-in theme when the CSS imports Tailwind (`{color.blue-500}`, `{text.sm}`, `{font-weight.semibold}`, `{shadow.md}`); `lamsa tokens` lists them. Prefer the project's own tokens (e.g. `{color.primary}`) over Tailwind's palette. Don't invent tokens and don't copy raw hex values that a token already covers (validate warns).
 - A frame can set `"mode": "dark"` to render in dark mode; `lamsa render --mode dark` forces it.
+- `"hidden": true` hides a node and everything inside it. `"locked": true` means the user locked it in the editor: don't move, restyle or delete a locked node (or anything inside it) unless the user asks you to.
 - Layout uses normal CSS: `display: flex|grid`, `gap`, `padding`, `width: "100%"`, `flex: 1`, `position: absolute` with `top`/`left` inside a `position: relative` frame.
 
 ## Components

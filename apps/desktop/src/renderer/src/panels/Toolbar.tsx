@@ -13,6 +13,7 @@ import {
   SquareTerminal,
   Sun,
   Type,
+  Smile,
 } from "lucide-react";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { insertNodes, newId } from "../lib/edits";
@@ -20,7 +21,9 @@ import { api, useEditor, type Tool } from "../lib/store";
 import { fitTo, zoomBy, zoomTo } from "../lib/viewport";
 import { shortcut } from "../lib/keys";
 import { LogoMark } from "./LogoMark";
+import { IconPicker, useIconNames } from "./IconField";
 import { Popover } from "./Popover";
+import { cn } from "../lib/cn";
 
 export function Tip({ label, keys, hint, children }: { label: string; keys?: string; hint?: [string, string]; children: ReactNode }) {
   return (
@@ -49,6 +52,7 @@ const TOOLS: { tool: Tool; icon: ReactNode; label: string; keys: string }[] = [
   { tool: "text", icon: <Type size={16} />, label: "Text", keys: "T" },
   { tool: "rect", icon: <Square size={16} />, label: "Rectangle", keys: "R" },
   { tool: "image", icon: <ImageIcon size={16} />, label: "Image", keys: "I" },
+  { tool: "icon", icon: <Smile size={16} />, label: "Icon", keys: "" },
   { tool: "component", icon: <Component size={16} />, label: "Component", keys: "C" },
 ];
 
@@ -67,6 +71,21 @@ export async function insertImage() {
   select([id]);
 }
 
+/** Inserts a lucide icon into the selected frame (or beside the selected layer), else at the top level. */
+export async function insertIcon(name: string) {
+  const { model, selection, commit, select, files } = useEditor.getState();
+  const id = newId(model);
+  const target = selection[0] ? model.nodes[selection[0]] : undefined;
+  const parent = target?.type === "frame" ? selection[0] : target?.parentId;
+  const node = { type: "icon" as const, set: "lucide" as const, icon: name, style: { width: 24, height: 24 } };
+  const file = model.fileOf.get(selection[0] ?? "") ?? Object.keys(files)[0] ?? "designs/main.lamsa.json";
+  const changes = parent
+    ? insertNodes({ model, entries: [{ root: { id, node } }], parentId: parent })
+    : insertNodes({ model, entries: [{ root: { id, node: { ...node, name: name, x: 0, y: 0 } } }], file });
+  await commit("Insert icon", changes);
+  select([id]);
+}
+
 export function Toolbar() {
   const { snapshot, tool, setTool, panels, togglePanel, canvasMode, setCanvasMode, viewport, selection, model, toast } = useEditor();
   const [zoomOpen, setZoomOpen] = useState(false);
@@ -75,12 +94,21 @@ export function Toolbar() {
   const [rendering, setRendering] = useState(false);
   const file = useEditor((s) => (s.selection[0] ? s.model.fileOf.get(s.selection[0]) : Object.keys(s.files)[0]));
 
+  const [iconOpen, setIconOpen] = useState(false);
+  const iconButton = useRef<HTMLButtonElement>(null);
+  const closeIcons = useCallback(() => setIconOpen(false), []);
+  const iconNames = useIconNames();
+
   const pickTool = (next: Tool) => {
+    if (next === "icon") {
+      setIconOpen(!iconOpen);
+      return;
+    }
     if (next === "image") {
       void insertImage();
       return;
     }
-    setTool(next);
+    setTool(next === "component" && tool === "component" ? "select" : next);
   };
 
   const render = async () => {
@@ -118,7 +146,7 @@ export function Toolbar() {
         <span className="crumb mono">{file ?? "no files"}</span>
         <span className="bar-divider" />
         <Tip label={panels.layers ? "Hide layers" : "Show layers"} keys={shortcut("mod+[")} hint={["Both sidebars", shortcut("mod+\\")]}>
-          <button className={`icon-btn ${panels.layers ? "is-active" : ""}`} onClick={() => togglePanel("layers")} aria-label="Toggle layers">
+          <button className={cn("icon-btn", { "is-active": panels.layers })} onClick={() => togglePanel("layers")} aria-label="Toggle layers">
             <PanelLeft size={16} />
           </button>
         </Tip>
@@ -127,11 +155,29 @@ export function Toolbar() {
       <div className="bar bar-tools">
         {TOOLS.map((t) => (
           <Tip key={t.tool} label={t.label} keys={t.keys}>
-            <button className={`icon-btn ${tool === t.tool ? "is-active" : ""}`} onClick={() => pickTool(t.tool)} aria-label={t.label}>
+            <button
+              ref={t.tool === "icon" ? iconButton : undefined}
+              className={cn("icon-btn", { "is-active": tool === t.tool || (t.tool === "icon" && iconOpen) })}
+              onClick={() => pickTool(t.tool)}
+              aria-label={t.label}
+              data-tool={t.tool}
+            >
               {t.icon}
             </button>
           </Tip>
         ))}
+        {iconOpen && (
+          <Popover anchor={iconButton.current} width={300} onClose={closeIcons} testId="insert-icon-picker">
+            <IconPicker
+              names={iconNames}
+              current=""
+              onPick={(name) => {
+                setIconOpen(false);
+                void insertIcon(name);
+              }}
+            />
+          </Popover>
+        )}
       </div>
 
       <div className="bar bar-view">
@@ -170,12 +216,12 @@ export function Toolbar() {
           )}
         </div>
         <Tip label={panels.terminal ? "Hide agent terminal" : "Show agent terminal"} keys={shortcut("mod+j")}>
-          <button className={`icon-btn ${panels.terminal ? "is-active" : ""}`} onClick={() => togglePanel("terminal")} aria-label="Toggle terminal">
+          <button className={cn("icon-btn", { "is-active": panels.terminal })} onClick={() => togglePanel("terminal")} aria-label="Toggle terminal">
             <SquareTerminal size={16} />
           </button>
         </Tip>
         <Tip label={panels.properties ? "Hide properties" : "Show properties"} keys={shortcut("mod+]")} hint={["Both sidebars", shortcut("mod+\\")]}>
-          <button className={`icon-btn ${panels.properties ? "is-active" : ""}`} onClick={() => togglePanel("properties")} aria-label="Toggle properties">
+          <button className={cn("icon-btn", { "is-active": panels.properties })} onClick={() => togglePanel("properties")} aria-label="Toggle properties">
             <PanelRight size={16} />
           </button>
         </Tip>

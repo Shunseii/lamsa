@@ -1,17 +1,42 @@
 import type { DesignNode } from "@lamsa/schema";
-import { ChevronRight, Component, EyeOff, FileJson, Frame, Image as ImageIcon, Search, Shapes, Type } from "lucide-react";
+import {
+  ChevronRight,
+  Component,
+  Eye,
+  EyeOff,
+  Lock,
+  LockOpen,
+  FileJson,
+  Frame,
+  Image as ImageIcon,
+  Search,
+  Shapes,
+  Type,
+} from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { reparent } from "../lib/edits";
-import { childrenOf, descendantsOf, hiddenByDefault, isComponent, nodeTitle, rootOf } from "../lib/model";
+import { toggleFlag } from "../lib/commands";
+import { shortcut } from "../lib/keys";
+import {
+  childrenOf,
+  descendantsOf,
+  hiddenByDefault,
+  isComponent,
+  isLocked,
+  nodeTitle,
+  rootOf,
+} from "../lib/model";
 import { useEditor } from "../lib/store";
 import { fitTo } from "../lib/viewport";
 import { insertInstance } from "./ComponentPicker";
+import { cn } from "../lib/cn";
 
 function NodeIcon({ node }: { node: DesignNode }) {
   if (node.type === "text") return <Type size={14} />;
   if (node.type === "image") return <ImageIcon size={14} />;
   if (node.type === "icon") return <Shapes size={14} />;
-  if (node.type === "instance" || isComponent(node)) return <Component size={14} className="accent" />;
+  if (node.type === "instance" || isComponent(node))
+    return <Component size={14} className="accent" />;
   return <Frame size={14} />;
 }
 
@@ -23,7 +48,11 @@ export function LayersPanel() {
     <div className="panel panel-left" data-testid="layers-panel">
       <div className="tabs">
         {(["layers", "files", "components"] as const).map((tab) => (
-          <button key={tab} className={`tab ${leftTab === tab ? "is-active" : ""}`} onClick={() => setLeftTab(tab)}>
+          <button
+            key={tab}
+            className={cn("tab", { "is-active": leftTab === tab })}
+            onClick={() => setLeftTab(tab)}
+          >
             {tab[0]!.toUpperCase() + tab.slice(1)}
           </button>
         ))}
@@ -36,7 +65,8 @@ export function LayersPanel() {
 }
 
 function LayersTree() {
-  const { model, selection, select, files, setHover, commit, previewProps } = useEditor();
+  const { model, selection, select, files, setHover, commit, previewProps } =
+    useEditor();
   const [filter, setFilter] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [dragging, setDragging] = useState<string | null>(null);
@@ -66,13 +96,29 @@ function LayersTree() {
     if (!target) return;
     let changes;
     if (drop.where === "inside") {
-      changes = reparent({ model, id: dragging, parentId: drop.id, beforeId: null });
+      changes = reparent({
+        model,
+        id: dragging,
+        parentId: drop.id,
+        beforeId: null,
+      });
     } else {
       const parentId = target.parentId;
-      const siblings = parentId ? childrenOf(model, parentId) : model.roots.filter((r) => model.fileOf.get(r) === model.fileOf.get(drop.id));
+      const siblings = parentId
+        ? childrenOf(model, parentId)
+        : model.roots.filter(
+            (r) => model.fileOf.get(r) === model.fileOf.get(drop.id),
+          );
       const position = siblings.indexOf(drop.id);
-      const beforeId = drop.where === "before" ? drop.id : (siblings[position + 1] ?? null);
-      changes = reparent({ model, id: dragging, parentId, beforeId, file: model.fileOf.get(drop.id) });
+      const beforeId =
+        drop.where === "before" ? drop.id : (siblings[position + 1] ?? null);
+      changes = reparent({
+        model,
+        id: dragging,
+        parentId,
+        beforeId,
+        file: model.fileOf.get(drop.id),
+      });
     }
     setDragging(null);
     setDrop(null);
@@ -85,9 +131,11 @@ function LayersTree() {
     const walk = (id: string) => {
       if (!model.nodes[id] || (matches && !matches.has(id))) return;
       order.push(id);
-      if (!collapsed.has(id) || matches !== null) for (const kid of childrenOf(model, id)) walk(kid);
+      if (!collapsed.has(id) || matches !== null)
+        for (const kid of childrenOf(model, id)) walk(kid);
     };
-    for (const path of Object.keys(files).sort()) for (const id of model.roots) if (model.fileOf.get(id) === path) walk(id);
+    for (const path of Object.keys(files).sort())
+      for (const id of model.roots) if (model.fileOf.get(id) === path) walk(id);
     return order;
   };
 
@@ -95,14 +143,22 @@ function LayersTree() {
     const node = model.nodes[id];
     if (!node || (matches && !matches.has(id))) return null;
     const kids = childrenOf(model, id);
-    const open = !collapsed.has(id) || (matches !== null);
+    const open = !collapsed.has(id) || matches !== null;
     const selected = selection.includes(id);
     const dropHere = drop?.id === id ? drop.where : null;
-    const defaultHidden = hiddenByDefault(model, id, previewProps[rootOf(model, id)]);
+    const defaultHidden = hiddenByDefault(
+      model,
+      id,
+      previewProps[rootOf(model, id)],
+    );
     return (
       <div key={id}>
         <div
-          className={`layer-row ${selected ? "is-selected" : ""} ${dropHere ? `drop-${dropHere}` : ""} ${node.hidden || defaultHidden ? "is-hidden" : ""}`}
+          className={cn("layer-row", dropHere && `drop-${dropHere}`, {
+            "is-selected": selected,
+            "is-hidden": node.hidden || defaultHidden,
+            "is-locked": isLocked(model, id),
+          })}
           style={{ paddingLeft: 8 + depth * 14 }}
           draggable
           onDragStart={(e) => {
@@ -110,12 +166,27 @@ function LayersTree() {
             e.dataTransfer.effectAllowed = "move";
           }}
           onDragOver={(e) => {
-            if (!dragging || dragging === id || descendantsOf(model, dragging).includes(id)) return;
+            if (
+              !dragging ||
+              dragging === id ||
+              descendantsOf(model, dragging).includes(id)
+            )
+              return;
             e.preventDefault();
-            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            const rect = (
+              e.currentTarget as HTMLElement
+            ).getBoundingClientRect();
             const y = (e.clientY - rect.top) / rect.height;
             const canNest = node.type === "frame";
-            setDrop({ id, where: canNest && y > 0.3 && y < 0.7 ? "inside" : y < 0.5 ? "before" : "after" });
+            setDrop({
+              id,
+              where:
+                canNest && y > 0.3 && y < 0.7
+                  ? "inside"
+                  : y < 0.5
+                    ? "before"
+                    : "after",
+            });
           }}
           onDragLeave={() => setDrop((d) => (d?.id === id ? null : d))}
           onDrop={(e) => {
@@ -131,14 +202,22 @@ function LayersTree() {
           onClick={(e) => {
             if (e.shiftKey) {
               const order = visibleOrder();
-              const from = order.indexOf(anchor.current ?? selection.at(-1) ?? id);
+              const from = order.indexOf(
+                anchor.current ?? selection.at(-1) ?? id,
+              );
               const to = order.indexOf(id);
               if (from === -1 || to === -1) select([id]);
-              else select(order.slice(Math.min(from, to), Math.max(from, to) + 1));
+              else
+                select(order.slice(Math.min(from, to), Math.max(from, to) + 1));
               return;
             }
             anchor.current = id;
-            if (e.ctrlKey || e.metaKey) select(selected ? selection.filter((s) => s !== id) : [...selection, id]);
+            if (e.ctrlKey || e.metaKey)
+              select(
+                selected
+                  ? selection.filter((s) => s !== id)
+                  : [...selection, id],
+              );
             else select([id]);
           }}
           onDoubleClick={() => fitTo("selection")}
@@ -152,7 +231,7 @@ function LayersTree() {
           }}
         >
           <span
-            className={`twisty ${kids.length ? "" : "is-empty"} ${open ? "is-open" : ""}`}
+            className={cn("twisty", { "is-empty": !kids.length, "is-open": open })}
             onClick={(e) => {
               e.stopPropagation();
               const next = new Set(collapsed);
@@ -165,16 +244,49 @@ function LayersTree() {
           </span>
           <NodeIcon node={node} />
           <span className="layer-name">{nodeTitle(id, node)}</span>
-          {node.hidden ? (
-            <EyeOff size={12} className="muted" />
-          ) : (
-            defaultHidden && (
-              <span className="layer-meta" title={`Hidden while ${defaultHidden.prop} = ${String(defaultHidden.value)}`}>
-                <EyeOff size={12} />
-              </span>
-            )
+          {node.type === "instance" && (
+            <span className="layer-meta">
+              {nodeTitle(node.componentId, model.nodes[node.componentId])}
+            </span>
           )}
-          {node.type === "instance" && <span className="layer-meta">{nodeTitle(node.componentId, model.nodes[node.componentId])}</span>}
+          <span
+            className="layer-actions"
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className={cn("layer-action", { "is-on": node.locked })}
+              aria-label={node.locked ? "Unlock layer" : "Lock layer"}
+              title={`${node.locked ? "Unlock" : "Lock"} (${shortcut("mod+shift+l")})`}
+              onClick={(e) => {
+                e.stopPropagation();
+                void toggleFlag({ ids: [id], field: "locked" });
+              }}
+            >
+              {node.locked ? <Lock size={12} /> : <LockOpen size={12} />}
+            </button>
+            {!node.hidden && defaultHidden ? (
+              <button
+                className="layer-action is-on is-locked-by-prop"
+                aria-label="Hidden by a prop"
+                title={`Hidden by a prop (${defaultHidden.prop} = ${String(defaultHidden.value)})`}
+                disabled
+              >
+                <EyeOff size={12} />
+              </button>
+            ) : (
+              <button
+                className={cn("layer-action", { "is-on": node.hidden })}
+                aria-label={node.hidden ? "Show layer" : "Hide layer"}
+                title={`${node.hidden ? "Show" : "Hide"} (${shortcut("mod+shift+h")})`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void toggleFlag({ ids: [id], field: "hidden" });
+                }}
+              >
+                {node.hidden ? <EyeOff size={12} /> : <Eye size={12} />}
+              </button>
+            )}
+          </span>
         </div>
         {open && kids.map((kid) => row(kid, depth + 1))}
       </div>
@@ -189,7 +301,11 @@ function LayersTree() {
     <div className="panel-body">
       <label className="search">
         <Search size={14} />
-        <input placeholder="Filter layers" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <input
+          placeholder="Filter layers"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
       </label>
       <div className="layer-list">
         {[...byFile].map(([path, roots]) => (
@@ -197,7 +313,9 @@ function LayersTree() {
             <div className="layer-file">
               <FileJson size={14} />
               <span>{path.split("/").pop()}</span>
-              {files[path]?.error && <span className="badge badge-danger">invalid</span>}
+              {files[path]?.error && (
+                <span className="badge badge-danger">invalid</span>
+              )}
             </div>
             {roots.map((id) => row(id, 1))}
           </div>
@@ -216,7 +334,9 @@ function FilesList() {
           .sort()
           .map((path) => {
             const fileIssues = issues.filter((i) => i.file === path);
-            const roots = model.roots.filter((id) => model.fileOf.get(id) === path);
+            const roots = model.roots.filter(
+              (id) => model.fileOf.get(id) === path,
+            );
             return (
               <button
                 key={path}
@@ -232,7 +352,11 @@ function FilesList() {
                   <span className="muted mono small">{path}</span>
                 </span>
                 <span className="muted small">{roots.length} top-level</span>
-                {fileIssues.some((i) => i.severity === "error") && <span className="badge badge-danger">{fileIssues.length}</span>}
+                {fileIssues.some((i) => i.severity === "error") && (
+                  <span className="badge badge-danger">
+                    {fileIssues.length}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -243,11 +367,19 @@ function FilesList() {
 
 function ComponentsList() {
   const { model, select } = useEditor();
-  const components = Object.entries(model.nodes).filter(([, node]) => isComponent(node) && !(node.type === "frame" && node.component?.internal));
+  const components = Object.entries(model.nodes).filter(
+    ([, node]) =>
+      isComponent(node) && !(node.type === "frame" && node.component?.internal),
+  );
   return (
     <div className="panel-body">
       <div className="list">
-        {components.length === 0 && <p className="muted pad">No components yet. A top-level frame with a "component" block becomes one.</p>}
+        {components.length === 0 && (
+          <p className="muted pad">
+            No components yet. A top-level frame with a "component" block
+            becomes one.
+          </p>
+        )}
         {components.map(([id, node]) => (
           <div key={id} className="list-row">
             <Component size={14} className="accent" />
@@ -255,7 +387,10 @@ function ComponentsList() {
               <span>{nodeTitle(id, node)}</span>
               <span className="muted mono small">{model.fileOf.get(id)}</span>
             </span>
-            <button className="ghost-btn small" onClick={() => void insertInstance(id)}>
+            <button
+              className="ghost-btn small"
+              onClick={() => void insertInstance(id)}
+            >
               Insert
             </button>
             <button

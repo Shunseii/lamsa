@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { emptyTokenSet, type LamsaConfig, type TokenSet } from "@lamsa/schema";
 import { parseShadcnTailwind4 } from "./shadcn-tailwind4.js";
@@ -34,7 +35,26 @@ export async function loadTokens(root: string, config: LamsaConfig): Promise<Tok
   if (!existsSync(path)) {
     throw new TokenSourceError(`token source ${source} does not exist; fix "tokens.path" in lamsa.config.json`);
   }
-  return parseShadcnTailwind4(await readFile(path, "utf8"), source);
+  const css = await readFile(path, "utf8");
+  const themePath = importsTailwind(css) ? tailwindThemePath(root) : undefined;
+  const defaults = themePath ? await readFile(themePath, "utf8") : undefined;
+  return parseShadcnTailwind4(css, { source, defaults });
+}
+
+function importsTailwind(css: string): boolean {
+  return /@import\s+(?:url\()?["']tailwindcss(?:\/theme(?:\.css)?)?["']/.test(css);
+}
+
+/** The project's own `tailwindcss/theme.css` when installed, so tokens match its Tailwind version; else lamsa's copy. */
+function tailwindThemePath(root: string): string | undefined {
+  for (const from of [join(root, "package.json"), import.meta.url]) {
+    try {
+      return createRequire(from).resolve("tailwindcss/theme.css");
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
 }
 
 export interface FontSetup {

@@ -72,6 +72,8 @@ const baseNodeShape = {
   x: z.number().optional(),
   y: z.number().optional(),
   hidden: z.boolean().optional(),
+  /** Locked in the editor: not selectable or movable on the canvas. Agents leave locked nodes alone unless asked. */
+  locked: z.boolean().optional(),
   style: styleSchema.optional(),
 };
 
@@ -187,6 +189,8 @@ export interface Token {
   kind: TokenKind;
   /** Resolved values for display and lint matching. */
   values: { light: string; dark?: string };
+  /** From the framework's built-in theme (e.g. Tailwind's palette) rather than the project's own CSS. */
+  builtin?: boolean;
 }
 
 export interface TokenSet {

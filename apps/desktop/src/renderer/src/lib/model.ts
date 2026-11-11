@@ -92,6 +92,12 @@ export function nodeTitle(id: string, node: DesignNode | undefined): string {
   return "Frame";
 }
 
+/** A layer is locked when it, or any layer it sits inside, has `locked: true`. */
+export function isLocked(model: Model, id: string): boolean {
+  if (model.nodes[id]?.locked) return true;
+  return ancestorsOf(model, id).some((ancestor) => model.nodes[ancestor]?.locked);
+}
+
 export function isComponent(node: DesignNode | undefined): boolean {
   return node?.type === "frame" && !!node.component;
 }

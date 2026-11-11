@@ -1,10 +1,11 @@
 import type { DesignNode } from "@lamsa/schema";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { insertNodes, newId, reparentMany, setStyle } from "../lib/edits";
-import { ancestorsOf, baseId, childrenOf, fileRegions, isComponent, nodeTitle, rootOf, type Model } from "../lib/model";
+import { ancestorsOf, baseId, childrenOf, fileRegions, isComponent, isLocked, nodeTitle, rootOf, type Model } from "../lib/model";
 import { shortcut } from "../lib/keys";
 import { useEditor } from "../lib/store";
 import { findElement, FrameView } from "./FrameView";
+import { cn } from "../lib/cn";
 
 interface Rect {
   x: number;
@@ -173,15 +174,26 @@ export function Canvas() {
    * a top-level screen, or an ancestor of the current selection. Main components, like instances,
    * select as a whole until you double-click into them. Ctrl/⌘ selects the deepest layer.
    */
-  const selectableId = (displayId: string, deep = false): string => {
+  const selectableId = (displayId: string, deep = false): string | null => {
     const id = baseId(displayId);
-    if (deep) return id;
     const chain = chainOf(id);
     const root = chain[0]!;
-    const entered = new Set<string>(isComponent(model.nodes[root]) ? [] : [root]);
-    for (const selected of selection) for (const ancestor of ancestorsOf(model, selected)) entered.add(ancestor);
-    for (let i = chain.length - 1; i >= 1; i--) if (entered.has(chain[i - 1]!)) return chain[i]!;
-    return root;
+    let pick = root;
+    if (deep) pick = id;
+    else {
+      const entered = new Set<string>(isComponent(model.nodes[root]) ? [] : [root]);
+      for (const selected of selection) for (const ancestor of ancestorsOf(model, selected)) entered.add(ancestor);
+      for (let i = chain.length - 1; i >= 1; i--) {
+        if (entered.has(chain[i - 1]!)) {
+          pick = chain[i]!;
+          break;
+        }
+      }
+    }
+    // Clicks pass through locked layers to the nearest unlocked layer around them, or to the canvas.
+    let candidate: string | undefined = pick;
+    while (candidate && isLocked(model, candidate)) candidate = model.nodes[candidate]?.parentId;
+    return candidate ?? null;
   };
 
   const isInside = (id: string, container: string) => id === container || ancestorsOf(model, id).includes(container);
@@ -320,13 +332,13 @@ export function Canvas() {
       return;
     }
 
-    if (!displayId) {
+    const id = displayId ? selectableId(displayId, e.ctrlKey || e.metaKey) : null;
+    if (!id) {
       if (!e.shiftKey) store().select([]);
       setDrag({ kind: "marquee", start: point, current: point, additive: e.shiftKey });
       return;
     }
 
-    const id = selectableId(displayId, e.ctrlKey || e.metaKey);
     if (e.shiftKey) {
       store().select(selection.includes(id) ? selection.filter((s) => s !== id) : [...selection, id]);
       return;
@@ -522,9 +534,9 @@ export function Canvas() {
         const picked: string[] = [];
         for (const rootId of m.roots) {
           const rect = screenRect(rootId);
-          if (!rect || !touches(rect)) continue;
+          if (!rect || !touches(rect) || m.nodes[rootId]?.locked) continue;
           if (contains(rect)) picked.push(rootId);
-          else picked.push(...childrenOf(m, rootId).filter((child) => { const r = screenRect(child); return !!r && touches(r); }));
+          else picked.push(...childrenOf(m, rootId).filter((child) => { const r = screenRect(child); return !!r && touches(r) && !m.nodes[child]?.locked; }));
         }
         store().select(current.additive ? [...selection, ...picked] : picked);
         return;
@@ -625,6 +637,7 @@ export function Canvas() {
     const id = baseId(displayId);
     const chain = chainOf(id);
     const scoped = selectableId(displayId);
+    if (!scoped || isLocked(model, id)) return;
     const deeper = chain[chain.indexOf(scoped) + 1];
     if (selection.includes(scoped) && deeper) {
       store().select([deeper]);
@@ -644,7 +657,7 @@ export function Canvas() {
     const displayId = hitTest(e.clientX, e.clientY);
     if (displayId) {
       const id = selectableId(displayId);
-      if (!selection.includes(id)) store().select([id]);
+      if (id && !selection.includes(id)) store().select([id]);
     }
     store().setContextMenu({ x: e.clientX, y: e.clientY });
   };
@@ -690,7 +703,7 @@ export function Canvas() {
       };
     }
     overlay.push(<div key={`sel-${id}`} className="ov-selection" style={rectStyle(shown)} />);
-    if (selection.length === 1 && !editingText) {
+    if (selection.length === 1 && !editingText && !isLocked(model, id)) {
       for (const handle of HANDLES) {
         overlay.push(<div key={`h-${handle}`} data-handle={handle} className={`ov-handle ov-handle-${handle}`} style={handleStyle(shown, handle)} />);
       }
@@ -775,7 +788,7 @@ export function Canvas() {
           return (
             <div key={id} className="frame-slot" style={{ left: (node.x ?? 0) + dxOf(id) + offset.x, top: (node.y ?? 0) + offset.y }}>
               <div
-                className={`frame-label ${selection.includes(id) ? "is-selected" : ""}`}
+                className={cn("frame-label", { "is-selected": selection.includes(id) })}
                 data-label-for={id}
                 style={{ transform: `scale(${1 / viewport.zoom})` }}
               >

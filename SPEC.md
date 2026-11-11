@@ -42,6 +42,7 @@ See [Competitors](#competitors) at the end.
 - IDs are global across the repo; cross-file references are by ID.
 - Child order is `parentId` plus a fractional `index` string on each node (tldraw-style), not `children` arrays, so concurrent inserts merge cleanly in git.
 - Top-level nodes carry canvas `x`/`y`.
+- `hidden: true` hides a node and its subtree. `locked: true` is saved in the file so teammates and agents see it: the editor won't select or move a locked node from the canvas, and agents leave it alone unless asked.
 
 ### Node types
 
@@ -65,7 +66,7 @@ v1: a plain `content` string per text node. Rich text runs come later, added wit
 ### Tokens
 
 - App code owns tokens. Pluggable **read-only adapters** parse them:
-  - `shadcn-tailwind4` (first): reads `globals.css` `:root`, `.dark`, and `@theme`, including fonts.
+  - `shadcn-tailwind4` (first): reads `globals.css` `:root`, `.dark`, and `@theme`, including fonts. When the CSS imports Tailwind, Tailwind's default theme (`tailwindcss/theme.css`, the project's installed copy first) adds palette, text, font-weight, tracking, leading, radius, shadow, blur, ease and container tokens, marked built-in; the project's `@theme` overrides them and `--color-*: initial` style resets remove them.
   - `dtcg-json` (later).
 - Tokens have modes (light/dark). The canvas, a frame, or an export picks the mode; frame overrides canvas, export flag overrides both.
 - Designs store references as `"{token.path}"` (DTCG alias syntax). Raw values are allowed; `lamsa validate` warns when a raw value matches a token.
@@ -130,11 +131,11 @@ Agent edits appear live, with no reload and no "close without saving". This is a
 
 - **Canvas:** pan/zoom, view across files/boards, token mode toggle.
 - **Panels:** the layers sidebar and properties sidebar can each be collapsed for more canvas: `⌘\` toggles both, `⌘[` the layers sidebar, `⌘]` the properties sidebar.
-- **Select:** click, shift-click, marquee; layers tree with drag to reorder/reparent.
+- **Select:** click, shift-click, marquee; layers tree with drag to reorder/reparent, plus show/hide (`⌘⇧H`) and lock (`⌘⇧L`) per layer.
 - **Direct manipulation:** move, resize, snapping and smart guides. Flex children drag to reorder, not to x/y.
 - **Text:** inline edit.
 - **Properties panel:** CSS properties for the selection, a token picker for every value, shared edits across multi-select.
-- **Insert:** frame, text, rect, image (drag in), component instance.
+- **Insert:** frame, text, rect, image (drag in), lucide icon (searchable picker), component instance.
 - **Components:** switch instance props/variants, go to main component, detach.
 - Copy/paste, duplicate, delete, group into frame.
 

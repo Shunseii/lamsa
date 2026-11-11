@@ -41,6 +41,31 @@ describe("shadcn-tailwind4 adapter", () => {
     expect(tokens.tokens["spacing.4"]?.values.light).toBe("1rem");
     expect(tokens.css).toContain(".dark {");
   });
+
+  it("adds Tailwind's built-in theme as builtin tokens, letting the project override or reset it", () => {
+    const defaults = `@theme default {
+  --color-blue-500: oklch(62% 0.2 260);
+  --color-red-500: oklch(63% 0.25 27);
+  --text-sm: 0.875rem;
+  --text-sm--line-height: calc(1.25 / 0.875);
+  --font-weight-bold: 700;
+  --radius-lg: 0.5rem;
+  --animate-spin: spin 1s linear infinite;
+}`;
+    const tokens = parseShadcnTailwind4(`@import "tailwindcss";\n@theme { --color-red-500: #f00; }`, { defaults });
+    expect(tokens.tokens["color.blue-500"]).toMatchObject({ css: "var(--color-blue-500)", kind: "color", builtin: true });
+    expect(tokens.tokens["color.red-500"]).toMatchObject({ values: { light: "#f00" } });
+    expect(tokens.tokens["color.red-500"]?.builtin).toBeUndefined();
+    expect(tokens.tokens["text.sm"]).toMatchObject({ kind: "text", values: { light: "0.875rem" } });
+    expect(tokens.tokens["font-weight.bold"]?.values.light).toBe("700");
+    expect(Object.keys(tokens.tokens).some((path) => path.includes("line-height") || path.startsWith("animate"))).toBe(false);
+    expect(tokens.css).toContain("--color-blue-500: oklch(62% 0.2 260);");
+
+    const reset = parseShadcnTailwind4(`@theme { --color-*: initial; --color-brand: #123456; }`, { defaults });
+    expect(reset.tokens["color.blue-500"]).toBeUndefined();
+    expect(reset.tokens["color.brand"]?.values.light).toBe("#123456");
+    expect(reset.tokens["text.sm"]).toBeDefined();
+  });
 });
 
 describe("formatDesignFile", () => {

@@ -14,6 +14,7 @@ import { TerminalPanel } from "./panels/TerminalPanel";
 import { Toasts } from "./panels/Toasts";
 import { Toolbar } from "./panels/Toolbar";
 import { Welcome } from "./panels/Welcome";
+import { cn } from "./lib/cn";
 
 function useFonts() {
   const snapshot = useEditor((s) => s.snapshot);
@@ -87,7 +88,7 @@ export function App() {
   const invalid = Object.values(files).filter((f) => f.error && f.error !== "deleted");
 
   return (
-    <div className={`editor ${panels.layers ? "has-left" : ""} ${panels.properties ? "has-right" : ""} ${panels.terminal ? "has-terminal" : ""}`}>
+    <div className={cn("editor", { "has-left": panels.layers, "has-right": panels.properties, "has-terminal": panels.terminal })}>
       <Canvas />
       <Toolbar />
       {invalid.length > 0 && (

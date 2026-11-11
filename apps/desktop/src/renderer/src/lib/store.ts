@@ -18,7 +18,7 @@ declare global {
 
 export const api = (): LamsaApi => window.lamsa;
 
-export type Tool = "select" | "hand" | "frame" | "rect" | "text" | "image" | "component";
+export type Tool = "select" | "hand" | "frame" | "rect" | "text" | "image" | "icon" | "component";
 
 export interface Viewport {
   x: number;

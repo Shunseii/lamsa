@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Popover } from "./Popover";
+import { cn } from "../lib/cn";
 
 export interface Suggestion {
   key: string;
@@ -142,7 +143,7 @@ export function AutocompleteInput({
                 key={suggestion.key}
                 role="option"
                 aria-selected={i === active}
-                className={`menu-item ${i === active ? "is-active" : ""}`}
+                className={cn("menu-item", { "is-active": i === active })}
                 onMouseDown={(e) => e.preventDefault()}
                 onMouseEnter={() => setActive(i)}
                 onClick={() => accept(suggestion)}

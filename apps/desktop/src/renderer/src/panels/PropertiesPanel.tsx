@@ -8,6 +8,7 @@ import { fitTo } from "../lib/viewport";
 import { AutocompleteInput, type Suggestion } from "./AutocompleteInput";
 import { IconField } from "./IconField";
 import { Popover } from "./Popover";
+import { cn } from "../lib/cn";
 
 interface FieldDef {
   property: string;
@@ -102,7 +103,8 @@ function tokenSuggestions(draft: string, tokens: Record<string, Token> | undefin
     return [];
   }
   const q = query.toLowerCase();
-  const rank = (t: Token) => (kind && t.kind !== kind ? 2 : 0) + (t.path.toLowerCase().startsWith(q) || t.path.toLowerCase().includes(`.${q}`) ? 0 : 1);
+  const rank = (t: Token) =>
+    (kind && t.kind !== kind ? 4 : 0) + (t.builtin ? 2 : 0) + (t.path.toLowerCase().startsWith(q) || t.path.toLowerCase().includes(`.${q}`) ? 0 : 1);
   return Object.values(tokens)
     .filter((t) => t.path.toLowerCase().includes(q))
     .sort((a, b) => rank(a) - rank(b) || a.path.localeCompare(b.path, undefined, { numeric: true }))
@@ -256,7 +258,7 @@ function SelectionProperties({ ids, nodes }: { ids: string[]; nodes: DesignNode[
                 {(["inherit", "light", "dark"] as const).map((mode) => (
                   <button
                     key={mode}
-                    className={(single.mode ?? "inherit") === mode ? "is-on" : ""}
+                    className={cn({ "is-on": (single.mode ?? "inherit") === mode })}
                     onClick={() => void commit("Set mode", patchNodes(model, ids, (n) => ({ ...n, mode: mode === "inherit" ? undefined : mode }) as DesignNode))}
                   >
                     {mode}
@@ -370,7 +372,7 @@ function MainComponentSection({ id, node }: { id: string; node: Extract<DesignNo
                 {options.map((option) => (
                   <button
                     key={String(option)}
-                    className={shown === option ? "is-on" : ""}
+                    className={cn({ "is-on": shown === option })}
                     title={option === def.default ? "Default" : undefined}
                     onClick={() => setPreviewProp(id, name, option === def.default ? undefined : option)}
                   >
@@ -425,7 +427,7 @@ function InstanceSection({ id, node }: { id: string; node: Extract<DesignNode, {
           {def.type === "enum" ? (
             <div className="segmented small wrap">
               {def.options.map((option) => (
-                <button key={option} className={(node.props?.[name] ?? def.default) === option ? "is-on" : ""} onClick={() => setProp(name, option)}>
+                <button key={option} className={cn({ "is-on": (node.props?.[name] ?? def.default) === option })} onClick={() => setProp(name, option)}>
                   {option}
                 </button>
               ))}
@@ -474,7 +476,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   useEffect(() => setCopied(false), [text]);
   return (
     <button
-      className={`icon-btn tiny ${copied ? "is-copied" : ""}`}
+      className={cn("icon-btn tiny", { "is-copied": copied })}
       aria-label={copied ? "Copied" : label}
       title={copied ? "Copied" : label}
       onClick={() => {
@@ -496,7 +498,7 @@ function Section({ title, children, collapsible }: { title: string; children: Re
     <div className="section">
       <button className="section-title" onClick={() => collapsible && setOpen(!open)}>
         {title}
-        {collapsible && <ChevronDown size={14} className={open ? "" : "rot"} />}
+        {collapsible && <ChevronDown size={14} className={cn({ rot: !open })} />}
       </button>
       {open && <div className="section-body">{children}</div>}
     </div>
@@ -576,7 +578,7 @@ function Field({
   return (
     <div className="field">
       <span className="field-label">{label}</span>
-      <div ref={control} className={`field-control ${isToken ? "is-token" : ""} ${menu ? "is-open" : ""}`}>
+      <div ref={control} className={cn("field-control", { "is-token": isToken, "is-open": menu })}>
         {swatch?.kind === "color" && <span className="swatch" style={{ background: swatch.values.light }} />}
         <AutocompleteInput
           className="input mono"
@@ -610,7 +612,7 @@ function Field({
             {options.map((option) => (
               <button
                 key={option}
-                className={`menu-item ${option === value ? "is-active" : ""}`}
+                className={cn("menu-item", { "is-active": option === value })}
                 onClick={() => {
                   setMenu(null);
                   if (option !== value) onCommit(option);
@@ -646,10 +648,12 @@ function TokenPicker({ tokens, kind, current, onPick }: { tokens: Record<string,
   const matches = Object.values(tokens)
     .filter((t) => t.path.toLowerCase().includes(q))
     .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
-  const suggested = kind ? matches.filter((t) => t.kind === kind) : matches;
-  const others = kind ? matches.filter((t) => t.kind !== kind) : [];
+  const ofKind = kind ? matches.filter((t) => t.kind === kind) : matches;
+  const suggested = ofKind.filter((t) => !t.builtin);
+  const builtins = ofKind.filter((t) => t.builtin);
+  const others = kind ? matches.filter((t) => t.kind !== kind && !t.builtin) : [];
   const row = (token: Token) => (
-    <button key={token.path} className={`menu-item ${token.path === current ? "is-active" : ""}`} title={token.values.light} onClick={() => onPick(token.path)}>
+    <button key={token.path} className={cn("menu-item", { "is-active": token.path === current })} title={token.values.light} onClick={() => onPick(token.path)}>
       {token.kind === "color" && <span className="swatch" style={{ background: token.values.light }} />}
       <span className="mono">{`{${token.path}}`}</span>
       <span className="muted small grow-right">{token.values.light}</span>
@@ -664,15 +668,21 @@ function TokenPicker({ tokens, kind, current, onPick }: { tokens: Record<string,
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
-          const first = suggested[0] ?? others[0];
+          const first = suggested[0] ?? builtins[0] ?? others[0];
           if (e.key === "Enter" && first) onPick(first.path);
         }}
       />
       <div className="popover-list">
         {suggested.map(row)}
+        {builtins.length > 0 && (
+          <>
+            <div className="overline">Tailwind defaults</div>
+            {builtins.map(row)}
+          </>
+        )}
         {others.length > 0 && (
           <>
-            <div className="overline">{suggested.length ? "Other tokens" : `No ${kind} tokens match · other tokens`}</div>
+            <div className="overline">{suggested.length || builtins.length ? "Other tokens" : `No ${kind} tokens match · other tokens`}</div>
             {others.map(row)}
           </>
         )}

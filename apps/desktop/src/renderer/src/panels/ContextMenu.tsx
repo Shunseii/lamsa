@@ -1,9 +1,10 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Model } from "../lib/model";
+import { hiddenByDefault, type Model } from "../lib/model";
 import { useEditor } from "../lib/store";
 import { runCommand, type CommandName } from "../lib/commands";
 import { isMac, shortcut } from "../lib/keys";
 import { useDismiss } from "./Popover";
+import { cn } from "../lib/cn";
 
 interface Item {
   label: string;
@@ -38,6 +39,12 @@ function itemsFor(model: Model, selection: string[]): Item[][] {
     [
       ...(sharedParent ? [{ label: "Group into frame", command: "group" as const, keys: shortcut("mod+g") }] : []),
       ...(nodes.some((n) => n.parentId !== undefined) ? [{ label: "Select parent", command: "select-parent" as const, keys: "Esc" }] : []),
+    ],
+    [
+      ...(selection.every((id) => !model.nodes[id]?.hidden && hiddenByDefault(model, id))
+        ? []
+        : [{ label: nodes.every((n) => n.hidden) ? "Show" : "Hide", command: "toggle-hidden" as const, keys: shortcut("mod+shift+h") }]),
+      { label: nodes.every((n) => n.locked) ? "Unlock" : "Lock", command: "toggle-locked", keys: shortcut("mod+shift+l") },
     ],
     [
       ...(single?.type === "instance" ? [{ label: "Go to main component", command: "go-to-main" as const }] : []),
@@ -84,7 +91,7 @@ function OpenContextMenu({ x, y }: { x: number; y: number }) {
           {group.map((item) => (
             <button
               key={item.command}
-              className={`menu-item ${item.danger ? "is-danger" : ""}`}
+              className={cn("menu-item", { "is-danger": item.danger })}
               onClick={() => {
                 setContextMenu(null);
                 void runCommand(item.command);

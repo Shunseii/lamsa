@@ -4,6 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import { ChevronDown, ExternalLink, Plus, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, useEditor } from "../lib/store";
+import { cn } from "../lib/cn";
 
 export function TerminalPanel() {
   const host = useRef<HTMLDivElement>(null);
@@ -63,7 +64,7 @@ export function TerminalPanel() {
   return (
     <div className="panel panel-terminal" data-testid="terminal-panel">
       <div className="terminal-head">
-        <span className={`term-tab ${status.state === "running" ? "is-live" : ""}`}>
+        <span className={cn("term-tab", { "is-live": status.state === "running" })}>
           <span className="dot" />
           {status.command || "agent"} <span className="muted mono">{root.split("/").slice(-1)[0] ? `~/${root.split("/").slice(-1)[0]}` : ""}</span>
         </span>

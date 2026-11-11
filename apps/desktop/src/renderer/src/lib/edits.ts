@@ -3,7 +3,7 @@ import type { DesignNode, Style } from "@lamsa/schema";
 import { generateKeyBetween, generateNKeysBetween } from "fractional-indexing";
 import { customAlphabet } from "nanoid";
 import type { NodeChange } from "../../../shared/api";
-import { childrenOf, descendantsOf, type Model } from "./model";
+import { childrenOf, descendantsOf, isComponent, type Model } from "./model";
 
 const nanoid = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 8);
 
@@ -243,15 +243,32 @@ export function reparentMany({
   return changes;
 }
 
-export function groupIntoFrame(model: Model, ids: string[]): { changes: NodeChange[]; frameId?: string } {
-  const picked = topmost(model, ids);
-  const parentId = model.nodes[picked[0]!]?.parentId;
-  if (parentId === undefined || picked.some((id) => model.nodes[id]?.parentId !== parentId)) return { changes: [] };
-  const siblings = childrenOf(model, parentId);
-  const ordered = siblings.filter((id) => picked.includes(id));
+export type GroupResult = { changes: NodeChange[]; frameId?: string; error?: string };
+
+/**
+ * Wraps sibling layers in a new flex frame. Top-level frames are wrapped in a new top-level frame
+ * that keeps their canvas positions: each becomes an absolutely positioned child, sized by `sizeOf`.
+ */
+export function groupIntoFrame({
+  model,
+  ids,
+  sizeOf,
+}: {
+  model: Model;
+  ids: string[];
+  sizeOf: (id: string) => { width: number; height: number } | null;
+}): GroupResult {
+  const picked = topmost(model, ids).filter((id) => model.nodes[id]);
+  if (!picked.length) return { changes: [] };
+  const parentId = model.nodes[picked[0]!]!.parentId;
+  if (picked.some((id) => model.nodes[id]!.parentId !== parentId)) {
+    return { changes: [], error: "These layers are in different frames. Move them into the same frame first." };
+  }
+  if (parentId === undefined) return groupRoots({ model, ids: picked, sizeOf });
+
+  const ordered = childrenOf(model, parentId).filter((id) => picked.includes(id));
   const frameId = newId(model);
-  const first = ordered[0]!;
-  const { low, high } = siblingKeyRange(model, parentId, first);
+  const { low, high } = siblingKeyRange(model, parentId, ordered[0]!);
   const frame: DesignNode = {
     type: "frame",
     name: "Group",
@@ -263,6 +280,52 @@ export function groupIntoFrame(model: Model, ids: string[]): { changes: NodeChan
   const keys = generateNKeysBetween(null, null, ordered.length);
   const changes: NodeChange[] = [{ file, id: frameId, node: frame }];
   ordered.forEach((id, i) => changes.push({ file, id, node: { ...model.nodes[id]!, parentId: frameId, index: keys[i] } as DesignNode }));
+  return { changes, frameId };
+}
+
+function groupRoots({
+  model,
+  ids,
+  sizeOf,
+}: {
+  model: Model;
+  ids: string[];
+  sizeOf: (id: string) => { width: number; height: number } | null;
+}): GroupResult {
+  const file = model.fileOf.get(ids[0]!)!;
+  if (ids.some((id) => model.fileOf.get(id) !== file)) {
+    return { changes: [], error: "These frames are in different design files." };
+  }
+  if (ids.some((id) => isComponent(model.nodes[id]))) {
+    return { changes: [], error: "Main components stay at the top level of the canvas." };
+  }
+  const boxes = ids.map((id) => {
+    const node = model.nodes[id]!;
+    const size = sizeOf(id) ?? { width: 0, height: 0 };
+    return { id, node, x: node.x ?? 0, y: node.y ?? 0, ...size };
+  });
+  const left = Math.min(...boxes.map((b) => b.x));
+  const top = Math.min(...boxes.map((b) => b.y));
+  const right = Math.max(...boxes.map((b) => b.x + b.width));
+  const bottom = Math.max(...boxes.map((b) => b.y + b.height));
+  const frameId = newId(model);
+  const frame: DesignNode = {
+    type: "frame",
+    name: "Group",
+    x: left,
+    y: top,
+    style: { position: "relative", width: Math.round(right - left), height: Math.round(bottom - top) },
+  };
+  const ordered = model.roots.filter((id) => ids.includes(id));
+  const keys = generateNKeysBetween(null, null, ordered.length);
+  const changes: NodeChange[] = [{ file, id: frameId, node: frame }];
+  ordered.forEach((id, i) => {
+    const box = boxes.find((b) => b.id === id)!;
+    const { x: _x, y: _y, ...rest } = box.node;
+    const style: Style = { ...rest.style, position: "absolute", left: box.x - left, top: box.y - top };
+    if (style.width === undefined) style.width = Math.round(box.width);
+    changes.push({ file, id, node: { ...rest, parentId: frameId, index: keys[i], style } as DesignNode });
+  });
   return { changes, frameId };
 }
 

@@ -411,7 +411,8 @@ function checkStyle(
 ) {
   const { tokens } = context;
   const colorValues = new Map<string, string>();
-  for (const token of Object.values(tokens.tokens)) {
+  const byPreference = Object.values(tokens.tokens).sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin));
+  for (const token of byPreference) {
     if (token.kind === "color") colorValues.set(normaliseColor(token.values.light), token.path);
   }
   for (const [property, value] of Object.entries(style)) {

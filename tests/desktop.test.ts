@@ -303,6 +303,12 @@ describe("desktop editor selection and moving", () => {
     await win.mouse.click(email.cx, email.cy);
     await win.keyboard.up("Control");
     await expect.poll(selected).toEqual(["Email field"]);
+    await win.keyboard.down("Control");
+    await win.keyboard.down("Shift");
+    await win.mouse.click(card.cx, card.cy);
+    await win.keyboard.up("Shift");
+    await win.keyboard.up("Control");
+    await expect.poll(selected).toEqual(["Email field", "Card field"]);
   });
 
   it("reorders by dragging, moves layers into another frame, and ignores drops on empty canvas", async () => {
@@ -448,6 +454,13 @@ describe("desktop editor selection and moving", () => {
     const layers = win.getByTestId("layers-panel");
     const lock = layers.locator(".layer-row", { has: win.locator(".layer-name", { hasText: /^lock$/ }) }).first();
     expect(await lock.getAttribute("class")).toContain("is-hidden");
+    const eye = lock.getByLabel("Hidden by a prop");
+    expect(await eye.isDisabled()).toBe(true);
+    await lock.locator(".layer-name").click();
+    const before = JSON.stringify(nodes("components.lamsa.json").BtnIcon1);
+    await win.keyboard.press("Control+Shift+H");
+    await win.waitForTimeout(300);
+    expect(JSON.stringify(nodes("components.lamsa.json").BtnIcon1)).toBe(before);
     await lock.dblclick();
     const zoom = await win.locator(".zoom .ghost-btn").textContent();
     expect(Number.parseInt(zoom ?? "", 10)).toBeGreaterThan(0);
@@ -578,6 +591,49 @@ describe("desktop editor selection and moving", () => {
     await expect.poll(() => nodes().HjlWoojj?.icon).toBe("chevron-right");
   });
 
+  it("hides and shows layers from the layers panel and the keyboard", async () => {
+    const layers = win.getByTestId("layers-panel");
+    const summaryRow = layers.locator(".layer-row", { has: win.locator(".layer-name", { hasText: /^Summary$/ }) });
+    await summaryRow.hover();
+    await summaryRow.getByLabel("Hide layer").click();
+    await expect.poll(() => nodes().ddPB6Wpj?.hidden).toBe(true);
+    await summaryRow.locator(".layer-name").click();
+    await win.keyboard.press("Control+Shift+H");
+    await expect.poll(() => nodes().ddPB6Wpj?.hidden).toBeUndefined();
+  });
+
+  it("locks a layer so canvas clicks pass through it to its parent", async () => {
+    const layers = win.getByTestId("layers-panel");
+    const payRow = layers.locator(".layer-row", { has: win.locator(".layer-name", { hasText: /^Pay button$/ }) });
+    await payRow.hover();
+    await payRow.getByLabel("Lock layer").click();
+    await expect.poll(() => nodes().QkpksTeC?.locked).toBe(true);
+
+    await layers.locator(".layer-name", { hasText: /^Checkout · Default$/ }).click();
+    await win.keyboard.press("Shift+Digit2");
+    await win.waitForTimeout(200);
+    await layers.locator(".layer-name", { hasText: /^Header$/ }).click();
+    const pay = await rect("QkpksTeC");
+    await win.mouse.click(pay.cx, pay.cy);
+    await expect.poll(selected).toEqual(["Checkout · Default"]);
+    expect(await win.locator(".ov-handle").count()).toBeGreaterThan(0);
+
+    await payRow.locator(".layer-name").click();
+    await expect.poll(selected).toEqual(["Pay button"]);
+    expect(await win.locator(".ov-handle").count()).toBe(0);
+    await win.keyboard.press("Control+Shift+L");
+    await expect.poll(() => nodes().QkpksTeC?.locked).toBeUndefined();
+  });
+
+  it("inserts an icon picked from the toolbar into the selected frame", async () => {
+    await win.getByTestId("layers-panel").locator(".layer-name", { hasText: /^Header$/ }).click();
+    await win.getByLabel("Icon", { exact: true }).click();
+    await win.getByTestId("insert-icon-picker").waitFor();
+    await win.keyboard.type("star");
+    await win.keyboard.press("Enter");
+    await expect.poll(() => Object.values(nodes()).filter((n) => n.type === "icon" && n.parentId === "Rwwc3Sdq" && n.icon === "star").length).toBe(1);
+  });
+
   it("nudges a top-level frame with the arrow keys", async () => {
     await win.getByTestId("layers-panel").locator(".layer-name", { hasText: /^Button$/ }).first().click();
     await expect.poll(selected).toEqual(["Button"]);
@@ -598,5 +654,58 @@ describe("desktop editor selection and moving", () => {
     await expect.poll(() => Object.keys(nodes("components.lamsa.json")).length).toBe(before + 3);
     const result = spawnSync(process.execPath, [CLI, "--json", "validate"], { cwd: selRoot, encoding: "utf8" });
     expect(JSON.parse(result.stdout)).toMatchObject({ errors: 0 });
+  });
+
+  it("groups top-level frames into a new frame that keeps their canvas positions", async () => {
+    const file = join(selRoot, "designs", "checkout.lamsa.json");
+    const data = JSON.parse(readFileSync(file, "utf8")) as { nodes: Record<string, unknown> };
+    data.nodes.TopA0001 = { type: "frame", name: "Top A", x: 0, y: 1200, style: { width: 120, height: 80, background: "#eee" } };
+    data.nodes.TopB0001 = { type: "frame", name: "Top B", x: 200, y: 1260, style: { height: 40, padding: 8 } };
+    data.nodes.TopBText1 = { type: "text", parentId: "TopB0001", index: "a0", content: "Second" };
+    writeFileSync(file, JSON.stringify(data, null, 2));
+    const layers = win.getByTestId("layers-panel");
+    await layers.getByText("Top A", { exact: true }).click();
+    await layers.getByText("Top B", { exact: true }).click({ modifiers: ["Control"] });
+    await expect.poll(selected).toEqual(["Top A", "Top B"]);
+    const beforeA = await rect("TopA0001");
+    const beforeB = await rect("TopB0001");
+    await win.keyboard.press("Control+g");
+    await expect.poll(() => nodes().TopA0001?.parentId).toBeTruthy();
+    const after = nodes();
+    const groupId = after.TopA0001!.parentId as string;
+    expect(after[groupId]).toMatchObject({ type: "frame", x: 0, y: 1200, style: { position: "relative", height: 100 } });
+    expect(after.TopA0001).not.toHaveProperty("x");
+    expect(after.TopA0001!.style).toMatchObject({ position: "absolute", left: 0, top: 0, width: 120 });
+    expect(after.TopB0001!.style).toMatchObject({ position: "absolute", left: 200, top: 60 });
+    expect(typeof (after.TopB0001!.style as Record<string, unknown>).width).toBe("number");
+    await expect.poll(async () => {
+      const [a, b] = [await rect("TopA0001"), await rect("TopB0001")];
+      return [a.x - beforeA.x, a.y - beforeA.y, b.x - beforeB.x, b.y - beforeB.y].map((d) => Math.round(d));
+    }).toEqual([0, 0, 0, 0]);
+  });
+
+  it("closes the component picker from its toolbar button, an outside click, or Escape", async () => {
+    const button = win.getByRole("button", { name: "Component", exact: true });
+    const picker = win.getByTestId("component-picker");
+    await button.click();
+    await picker.waitFor();
+    await button.click();
+    await picker.waitFor({ state: "detached" });
+    await button.click();
+    await picker.waitFor();
+    await clickEmpty();
+    await picker.waitFor({ state: "detached" });
+    await button.click();
+    await picker.waitFor();
+    await win.keyboard.press("Escape");
+    await picker.waitFor({ state: "detached" });
+  });
+
+  it("explains why layers can't be grouped", async () => {
+    const layers = win.getByTestId("layers-panel");
+    await layers.locator(".layer-name", { hasText: /^Button$/ }).first().click();
+    await layers.locator(".layer-name", { hasText: /^Input$/ }).first().click({ modifiers: ["Control"] });
+    await win.keyboard.press("Control+g");
+    await expect.poll(() => win.getByTestId("toasts").textContent()).toContain("Main components stay at the top level");
   });
 });

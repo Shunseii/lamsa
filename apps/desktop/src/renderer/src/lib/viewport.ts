@@ -63,3 +63,10 @@ export function fitTo(target: "all" | "selection") {
     y: insetTop + (availableH - (bottom - top) * zoom) / 2 - top * zoom,
   });
 }
+
+/** A rendered node's size in design pixels (unscaled by zoom). */
+export function measuredSize(id: string): { width: number; height: number } | null {
+  const { model, viewport } = useEditor.getState();
+  const rect = findElement(rootOf(model, id), id)?.getBoundingClientRect();
+  return rect ? { width: rect.width / viewport.zoom, height: rect.height / viewport.zoom } : null;
+}

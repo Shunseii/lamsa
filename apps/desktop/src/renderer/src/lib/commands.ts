@@ -1,8 +1,9 @@
 import type { DesignNode } from "@lamsa/schema";
 import type { NodeChange } from "../../../shared/api";
 import { deleteSubtrees, detachInstance, duplicate, fromNested, groupIntoFrame, insertNodes, toNested, topmost } from "./edits";
+import { hiddenByDefault, isLocked, rootOf } from "./model";
 import { useEditor } from "./store";
-import { fitTo, zoomBy, zoomTo } from "./viewport";
+import { fitTo, measuredSize, zoomBy, zoomTo } from "./viewport";
 
 export type CommandName =
   | "copy"
@@ -22,7 +23,9 @@ export type CommandName =
   | "undo"
   | "redo"
   | "go-to-main"
-  | "detach";
+  | "detach"
+  | "toggle-hidden"
+  | "toggle-locked";
 
 export async function runCommand(name: CommandName): Promise<void> {
   const state = useEditor.getState();
@@ -71,9 +74,9 @@ export async function runCommand(name: CommandName): Promise<void> {
       return;
     }
     case "group": {
-      const result = groupIntoFrame(model, selection);
+      const result = groupIntoFrame({ model, ids: selection, sizeOf: (id) => measuredSize(id) });
       if (!result.frameId) {
-        state.toast({ tone: "warn", title: "Can't group", message: "Group layers that share a parent frame." });
+        if (result.error) state.toast({ tone: "warn", title: "Can't group", message: result.error });
         return;
       }
       await commit("Group", result.changes);
@@ -121,6 +124,12 @@ export async function runCommand(name: CommandName): Promise<void> {
     case "redo":
       state.redo();
       return;
+    case "toggle-hidden":
+    case "toggle-locked": {
+      const field = name === "toggle-hidden" ? "hidden" : "locked";
+      await toggleFlag({ ids: selection, field });
+      return;
+    }
     case "go-to-main": {
       const node = model.nodes[selection[0] ?? ""];
       if (node?.type !== "instance") return;
@@ -137,12 +146,32 @@ export async function runCommand(name: CommandName): Promise<void> {
   }
 }
 
+/** Sets `hidden` or `locked` on every layer in `ids`, or clears it when they all have it already. */
+export async function toggleFlag({ ids, field }: { ids: string[]; field: "hidden" | "locked" }): Promise<void> {
+  const { model, commit, previewProps } = useEditor.getState();
+  // A layer hidden by a component prop is shown or hidden by changing the prop, not by hand.
+  const targets = ids.filter(
+    (id) => model.nodes[id] && !(field === "hidden" && !model.nodes[id]!.hidden && hiddenByDefault(model, id, previewProps[rootOf(model, id)])),
+  );
+  if (!targets.length) return;
+  const turnOn = !targets.every((id) => model.nodes[id]![field]);
+  const changes = targets.map((id) => {
+    const node = { ...model.nodes[id]! } as DesignNode;
+    if (turnOn) node[field] = true;
+    else delete node[field];
+    return { file: model.fileOf.get(id)!, id, node };
+  });
+  const label = field === "hidden" ? (turnOn ? "Hide" : "Show") : turnOn ? "Lock" : "Unlock";
+  await commit(label, changes);
+}
+
 /** Arrow keys: top-level frames move on the canvas, absolutely positioned layers move by left/top. */
 async function nudge(dx: number, dy: number): Promise<void> {
   const { model, selection, commit } = useEditor.getState();
   const numeric = (value: unknown) => (typeof value === "number" ? value : typeof value === "string" && /^-?\d+(\.\d+)?(px)?$/.test(value) ? Number.parseFloat(value) : 0);
   const changes = topmost(model, selection).flatMap((id): NodeChange[] => {
     const node = model.nodes[id]!;
+    if (isLocked(model, id)) return [];
     if (node.parentId === undefined) return [{ file: model.fileOf.get(id)!, id, node: { ...node, x: (node.x ?? 0) + dx, y: (node.y ?? 0) + dy } as DesignNode }];
     if (node.style?.position !== "absolute") return [];
     const style = { ...node.style, left: numeric(node.style.left) + dx, top: numeric(node.style.top) + dy };
@@ -164,6 +193,8 @@ export function installShortcuts(): () => void {
       void runCommand(name);
     };
     if (mod) {
+      if (key === "h" && e.shiftKey) return run("toggle-hidden");
+      if (key === "l" && e.shiftKey) return run("toggle-locked");
       if (key === "z" && e.shiftKey) return run("redo");
       if (key === "z") return run("undo");
       if (key === "y") return run("redo");
