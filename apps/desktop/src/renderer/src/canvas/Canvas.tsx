@@ -1,7 +1,8 @@
 import type { DesignNode } from "@lamsa/schema";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { insertNodes, newId, reparent, setStyle } from "../lib/edits";
-import { baseId, childrenOf, fileRegions, nodeTitle, rootOf, type Model } from "../lib/model";
+import { insertNodes, newId, reparentMany, setStyle } from "../lib/edits";
+import { ancestorsOf, baseId, childrenOf, fileRegions, isComponent, nodeTitle, rootOf, type Model } from "../lib/model";
+import { shortcut } from "../lib/keys";
 import { useEditor } from "../lib/store";
 import { findElement, FrameView } from "./FrameView";
 
@@ -18,11 +19,11 @@ const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 type Drag =
   | { kind: "pan"; startX: number; startY: number; origin: { x: number; y: number } }
   | { kind: "marquee"; start: { x: number; y: number }; current: { x: number; y: number }; additive: boolean }
-  | { kind: "pending-move"; start: { x: number; y: number }; id: string }
-  | { kind: "move-roots"; start: { x: number; y: number }; ids: string[]; origins: Record<string, { x: number; y: number }>; delta: { x: number; y: number }; guides: Guide[] }
+  | { kind: "pending-move"; start: { x: number; y: number }; id: string; collapse: boolean }
+  | { kind: "move-roots"; start: { x: number; y: number }; ids: string[]; origins: Record<string, { x: number; y: number }>; startRects: Record<string, Rect | null>; delta: { x: number; y: number }; guides: Guide[] }
   | { kind: "move-absolute"; start: { x: number; y: number }; id: string; origin: { left: number; top: number }; delta: { x: number; y: number } }
-  | { kind: "reorder"; start: { x: number; y: number }; id: string; parentId: string; beforeId: string | null; line: Rect | null }
-  | { kind: "resize"; start: { x: number; y: number }; id: string; handle: Handle; origin: Rect; isRoot: boolean; absolute: boolean; originPos: { left: number; top: number }; size: { w: number; h: number } }
+  | { kind: "reorder"; start: { x: number; y: number }; ids: string[]; fromParent: string; parentId: string; beforeId: string | null; line: Rect | null }
+  | { kind: "resize"; start: { x: number; y: number }; id: string; handle: Handle; origin: Rect; isRoot: boolean; absolute: boolean; originPos: { left: number; top: number }; size: { w: number; h: number }; moved: boolean }
   | { kind: "draw"; start: { x: number; y: number }; current: { x: number; y: number }; parentId?: string; tool: "frame" | "rect" };
 
 interface Guide {
@@ -64,6 +65,8 @@ export function Canvas() {
   const [, setTick] = useState(0);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [space, setSpace] = useState(false);
+  /** The last press was a drag (move, resize, draw…), so its click shouldn't count toward a double-click. */
+  const draggedRecently = useRef(false);
 
   const {
     snapshot,
@@ -77,11 +80,12 @@ export function Canvas() {
     renderVersion,
     editingText,
     flash,
+    previewProps,
   } = useEditor();
   const store = useEditor.getState;
 
   const tokens = snapshot?.tokens;
-  const regions = fileRegions(model);
+  const regions = fileRegions(model, snapshot?.root);
   const dxOf = (id: string) => regions.get(model.fileOf.get(id) ?? "")?.dx ?? 0;
   const dxOfFile = (file: string) => regions.get(file)?.dx ?? 0;
 
@@ -144,7 +148,7 @@ export function Canvas() {
         const box = element.getBoundingClientRect();
         const px = e.clientX - box.left;
         const py = e.clientY - box.top;
-        const zoom = Math.min(8, Math.max(0.05, vp.zoom * Math.exp(-e.deltaY * 0.01)));
+        const zoom = Math.min(8, Math.max(0.05, vp.zoom * zoomFactor(e)));
         store().setViewport({ zoom, x: px - ((px - vp.x) * zoom) / vp.zoom, y: py - ((py - vp.y) * zoom) / vp.zoom });
       } else {
         store().setViewport({ ...vp, x: vp.x - e.deltaX, y: vp.y - e.deltaY });
@@ -161,7 +165,35 @@ export function Canvas() {
     return id;
   };
 
-  const selectableId = (displayId: string): string => baseId(displayId);
+  /** root → … → id */
+  const chainOf = (id: string): string[] => [...ancestorsOf(model, id)].reverse().concat(id);
+
+  /**
+   * What a click on `displayId` selects (Figma's rules): the deepest layer whose parent is "entered" —
+   * a top-level screen, or an ancestor of the current selection. Main components, like instances,
+   * select as a whole until you double-click into them. Ctrl/⌘ selects the deepest layer.
+   */
+  const selectableId = (displayId: string, deep = false): string => {
+    const id = baseId(displayId);
+    if (deep) return id;
+    const chain = chainOf(id);
+    const root = chain[0]!;
+    const entered = new Set<string>(isComponent(model.nodes[root]) ? [] : [root]);
+    for (const selected of selection) for (const ancestor of ancestorsOf(model, selected)) entered.add(ancestor);
+    for (let i = chain.length - 1; i >= 1; i--) if (entered.has(chain[i - 1]!)) return chain[i]!;
+    return root;
+  };
+
+  const isInside = (id: string, container: string) => id === container || ancestorsOf(model, id).includes(container);
+
+  /** The frame a dragged layer would land in under the pointer, never inside what is being dragged. */
+  const dropTargetAt = (clientX: number, clientY: number, moving: string[]): string | null => {
+    const hit = hitTest(clientX, clientY);
+    if (!hit) return null;
+    let id: string | undefined = baseId(hit);
+    while (id && (model.nodes[id]?.type !== "frame" || moving.some((m) => isInside(id!, m)))) id = model.nodes[id]?.parentId;
+    return id ?? null;
+  };
 
   const startTextEdit = (displayId: string) => {
     const id = baseId(displayId);
@@ -253,7 +285,8 @@ export function Canvas() {
         isRoot: node.parentId === undefined,
         absolute,
         originPos: { left: numberOr(node.style?.left, 0), top: numberOr(node.style?.top, 0) },
-        size: { w: rect.w / viewport.zoom, h: rect.h / viewport.zoom },
+        size: { w: Math.round(rect.w / viewport.zoom), h: Math.round(rect.h / viewport.zoom) },
+        moved: false,
       });
       return;
     }
@@ -293,13 +326,13 @@ export function Canvas() {
       return;
     }
 
-    const id = selectableId(displayId);
+    const id = selectableId(displayId, e.ctrlKey || e.metaKey);
     if (e.shiftKey) {
       store().select(selection.includes(id) ? selection.filter((s) => s !== id) : [...selection, id]);
       return;
     }
     if (!selection.includes(id)) store().select([id]);
-    setDrag({ kind: "pending-move", start: point, id });
+    setDrag({ kind: "pending-move", start: point, id, collapse: selection.length > 1 && selection.includes(id) });
   };
 
   const placeInParent = (parentId: string, world: { x: number; y: number }, node: DesignNode): DesignNode => {
@@ -323,16 +356,17 @@ export function Canvas() {
         start: pending.start,
         ids,
         origins: Object.fromEntries(ids.map((id) => [id, { x: model.nodes[id]?.x ?? 0, y: model.nodes[id]?.y ?? 0 }])),
+        startRects: Object.fromEntries(ids.map((id) => [id, screenRect(id)])),
         delta: { x: 0, y: 0 },
         guides: [],
       };
     }
-    if (ids.length !== 1) return null;
+    const parentId = model.nodes[ids[0]!]?.parentId;
+    if (!parentId || ids.some((id) => model.nodes[id]?.parentId !== parentId)) return null;
     const id = ids[0]!;
-    const node = model.nodes[id];
-    if (!node?.parentId) return null;
+    const node = model.nodes[id]!;
     const element = findElement(rootOf(model, id), id);
-    if (element && getComputedStyle(element).position === "absolute") {
+    if (ids.length === 1 && element && getComputedStyle(element).position === "absolute") {
       return {
         kind: "move-absolute",
         start: pending.start,
@@ -342,7 +376,8 @@ export function Canvas() {
       };
     }
     void e;
-    return { kind: "reorder", start: pending.start, id, parentId: node.parentId, beforeId: null, line: null };
+    const ordered = childrenOf(model, parentId).filter((sibling) => ids.includes(sibling));
+    return { kind: "reorder", start: pending.start, ids: ordered, fromParent: parentId, parentId, beforeId: null, line: null };
   };
 
   const snapRoots = (ids: string[], dx: number, dy: number): { dx: number; dy: number; guides: Guide[] } => {
@@ -387,7 +422,7 @@ export function Canvas() {
     if (!drag) {
       if (tool === "select" && !editingText) {
         const id = hitTest(e.clientX, e.clientY);
-        const next = id ? selectableId(id) : null;
+        const next = id ? selectableId(id, e.ctrlKey || e.metaKey) : null;
         if (next !== hover) store().setHover(next);
       }
       return;
@@ -412,13 +447,23 @@ export function Canvas() {
         setDrag({ ...drag, delta: { x: snapped.dx, y: snapped.dy }, guides: snapped.guides });
         return;
       }
-      case "move-absolute":
-        setDrag({ ...drag, delta: { x: (point.x - drag.start.x) / viewport.zoom, y: (point.y - drag.start.y) / viewport.zoom } });
+      case "move-absolute": {
+        const delta = { x: (point.x - drag.start.x) / viewport.zoom, y: (point.y - drag.start.y) / viewport.zoom };
+        const element = findElement(rootOf(model, drag.id), drag.id);
+        if (element) element.style.translate = `${delta.x}px ${delta.y}px`;
+        setDrag({ ...drag, delta });
         return;
+      }
       case "reorder": {
-        const parentElement = findElement(rootOf(model, drag.parentId), drag.parentId);
+        const target = dropTargetAt(e.clientX, e.clientY, drag.ids);
+        if (!target) {
+          if (drag.line) setDrag({ ...drag, line: null });
+          return;
+        }
+        const parentId = target;
+        const parentElement = findElement(rootOf(model, parentId), parentId);
         const { axis } = isFlowParent(parentElement);
-        const siblings = childrenOf(model, drag.parentId).filter((id) => id !== drag.id);
+        const siblings = childrenOf(model, parentId).filter((id) => !drag.ids.includes(id));
         let beforeId: string | null = null;
         let line: Rect | null = null;
         for (const sibling of siblings) {
@@ -435,10 +480,11 @@ export function Canvas() {
         }
         if (!line) {
           const last = siblings.at(-1);
-          const rect = last ? screenRect(last) : screenRect(drag.parentId);
-          if (rect) line = axis === "x" ? { x: rect.x + rect.w, y: rect.y, w: 2, h: rect.h } : { x: rect.x, y: rect.y + rect.h, w: rect.w, h: 2 };
+          const rect = last ? screenRect(last) : screenRect(parentId);
+          if (rect && last) line = axis === "x" ? { x: rect.x + rect.w, y: rect.y, w: 2, h: rect.h } : { x: rect.x, y: rect.y + rect.h, w: rect.w, h: 2 };
+          else if (rect) line = axis === "x" ? { x: rect.x + 2, y: rect.y, w: 2, h: rect.h } : { x: rect.x, y: rect.y + 2, w: rect.w, h: 2 };
         }
-        setDrag({ ...drag, beforeId, line });
+        setDrag({ ...drag, parentId, beforeId, line });
         return;
       }
       case "resize": {
@@ -450,7 +496,8 @@ export function Canvas() {
         if (drag.handle.includes("w")) w -= dx;
         if (drag.handle.includes("s")) h += dy;
         if (drag.handle.includes("n")) h -= dy;
-        setDrag({ ...drag, size: { w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) } });
+        const moved = drag.moved || Math.hypot(point.x - drag.start.x, point.y - drag.start.y) >= 2;
+        setDrag({ ...drag, moved, size: moved ? { w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) } : drag.size });
         return;
       }
       case "draw":
@@ -462,6 +509,7 @@ export function Canvas() {
   const onPointerUp = (e: React.PointerEvent) => {
     container.current?.releasePointerCapture(e.pointerId);
     const current = drag;
+    draggedRecently.current = !!current && current.kind !== "pending-move" && current.kind !== "marquee";
     setDrag(null);
     if (!current) return;
     const m = store().model;
@@ -469,11 +517,15 @@ export function Canvas() {
       case "marquee": {
         const box = normalise(current.start, current.current, container.current!.getBoundingClientRect());
         if (box.w < 3 && box.h < 3) return;
-        const inside = (id: string) => {
-          const rect = screenRect(id);
-          return !!rect && rect.x >= box.x && rect.y >= box.y && rect.x + rect.w <= box.x + box.w && rect.y + rect.h <= box.y + box.h;
-        };
-        const picked = Object.keys(m.nodes).filter((id) => inside(id) && !(m.nodes[id]!.parentId && inside(m.nodes[id]!.parentId!)));
+        const contains = (rect: Rect) => rect.x >= box.x && rect.y >= box.y && rect.x + rect.w <= box.x + box.w && rect.y + rect.h <= box.y + box.h;
+        const touches = (rect: Rect) => rect.x < box.x + box.w && rect.x + rect.w > box.x && rect.y < box.y + box.h && rect.y + rect.h > box.y;
+        const picked: string[] = [];
+        for (const rootId of m.roots) {
+          const rect = screenRect(rootId);
+          if (!rect || !touches(rect)) continue;
+          if (contains(rect)) picked.push(rootId);
+          else picked.push(...childrenOf(m, rootId).filter((child) => { const r = screenRect(child); return !!r && touches(r); }));
+        }
         store().select(current.additive ? [...selection, ...picked] : picked);
         return;
       }
@@ -490,6 +542,8 @@ export function Canvas() {
         return;
       }
       case "move-absolute":
+        findElement(rootOf(m, current.id), current.id)?.style.removeProperty("translate");
+        if (current.delta.x === 0 && current.delta.y === 0) return;
         void store().commit(
           "Move",
           setStyle(m, [current.id], {
@@ -498,15 +552,24 @@ export function Canvas() {
           }),
         );
         return;
+      case "pending-move":
+        if (current.collapse) store().select([current.id]);
+        return;
       case "reorder": {
-        const siblings = childrenOf(m, current.parentId);
-        const position = siblings.indexOf(current.id);
-        const after = siblings[position + 1] ?? null;
-        if (current.beforeId === after || current.beforeId === current.id) return;
-        void store().commit("Reorder", reparent({ model: m, id: current.id, parentId: current.parentId, beforeId: current.beforeId }));
+        if (!current.line) return;
+        if (current.parentId === current.fromParent) {
+          const siblings = childrenOf(m, current.parentId);
+          const last = current.ids.at(-1)!;
+          const after = siblings[siblings.indexOf(last) + 1] ?? null;
+          const contiguous = current.ids.every((id, i) => siblings.indexOf(id) === siblings.indexOf(current.ids[0]!) + i);
+          if (contiguous && (current.beforeId === after || current.ids.includes(current.beforeId ?? ""))) return;
+        }
+        const changes = reparentMany({ model: m, ids: current.ids, parentId: current.parentId, beforeId: current.beforeId });
+        if (changes.length) void store().commit(current.parentId === current.fromParent ? "Reorder" : "Move into frame", changes);
         return;
       }
       case "resize": {
+        if (!current.moved) return;
         const { w, h } = current.size;
         const dw = w - current.origin.w / viewport.zoom;
         const dh = h - current.origin.h / viewport.zoom;
@@ -556,15 +619,24 @@ export function Canvas() {
   };
 
   const onDoubleClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).dataset.handle || draggedRecently.current) return;
     const displayId = hitTest(e.clientX, e.clientY);
     if (!displayId) return;
     const id = baseId(displayId);
-    const node = model.nodes[id];
-    if (displayId.includes("/")) {
-      startTextEdit(displayId);
-    } else if (node?.type === "text") {
-      startTextEdit(displayId);
+    const chain = chainOf(id);
+    const scoped = selectableId(displayId);
+    const deeper = chain[chain.indexOf(scoped) + 1];
+    if (selection.includes(scoped) && deeper) {
+      store().select([deeper]);
+      if (deeper === id && model.nodes[id]?.type === "text" && !displayId.includes("/")) startTextEdit(displayId);
+      return;
     }
+    if (displayId.includes("/")) {
+      const inner = displayId.split("/").at(-1)!;
+      if (model.nodes[inner]?.type === "text") startTextEdit(displayId);
+      return;
+    }
+    if (model.nodes[id]?.type === "text") startTextEdit(displayId);
   };
 
   const onContextMenu = (e: React.MouseEvent) => {
@@ -574,8 +646,7 @@ export function Canvas() {
       const id = selectableId(displayId);
       if (!selection.includes(id)) store().select([id]);
     }
-    const box = container.current!.getBoundingClientRect();
-    store().setContextMenu({ x: e.clientX - box.left, y: e.clientY - box.top });
+    store().setContextMenu({ x: e.clientX, y: e.clientY });
   };
 
   const cursor =
@@ -587,7 +658,15 @@ export function Canvas() {
   };
 
   const overlay: React.ReactNode[] = [];
-  const selectionRects = selection.map((id) => [id, screenRect(id)] as const);
+  /** While frames are dragged their DOM already moves, so draw from where the drag started. */
+  const liveRect = (id: string): Rect | null => {
+    if (drag?.kind === "move-roots" && drag.ids.includes(id)) {
+      const start = drag.startRects[id];
+      return start ? { ...start, x: start.x + drag.delta.x * viewport.zoom, y: start.y + drag.delta.y * viewport.zoom } : null;
+    }
+    return screenRect(id);
+  };
+  const selectionRects = selection.map((id) => [id, liveRect(id)] as const);
   if (hover && !selection.includes(hover) && !drag) {
     const rect = screenRect(hover);
     if (rect) overlay.push(<div key="hover" className="ov-hover" style={rectStyle(rect)} />);
@@ -600,8 +679,6 @@ export function Canvas() {
   for (const [id, rect] of selectionRects) {
     if (!rect) continue;
     let shown = rect;
-    if (drag?.kind === "move-roots" && drag.ids.includes(id)) shown = { ...rect, x: rect.x + drag.delta.x * viewport.zoom, y: rect.y + drag.delta.y * viewport.zoom };
-    if (drag?.kind === "move-absolute" && drag.id === id) shown = { ...rect, x: rect.x + drag.delta.x * viewport.zoom, y: rect.y + drag.delta.y * viewport.zoom };
     if (drag?.kind === "resize" && drag.id === id) {
       const w = drag.size.w * viewport.zoom;
       const h = drag.size.h * viewport.zoom;
@@ -645,7 +722,11 @@ export function Canvas() {
   if (drag?.kind === "marquee") {
     overlay.push(<div key="marquee" className="ov-marquee" style={rectStyle(normalise(drag.start, drag.current, container.current!.getBoundingClientRect()))} />);
   }
-  if (drag?.kind === "reorder" && drag.line) overlay.push(<div key="drop" className="ov-drop" style={rectStyle(drag.line)} />);
+  if (drag?.kind === "reorder" && drag.line) {
+    overlay.push(<div key="drop" className="ov-drop" style={rectStyle(drag.line)} />);
+    const target = drag.parentId !== drag.fromParent ? screenRect(drag.parentId) : null;
+    if (target) overlay.push(<div key="drop-target" className="ov-hover" style={rectStyle(target)} />);
+  }
   if (drag?.kind === "move-roots") {
     for (const guide of drag.guides) {
       const at = guide.at * viewport.zoom + (guide.axis === "x" ? viewport.x : viewport.y);
@@ -707,6 +788,7 @@ export function Canvas() {
                 tokens={tokens}
                 icons={icons}
                 canvasMode={canvasMode}
+                componentProps={previewProps[id]}
                 version={renderVersion}
                 frozen={!!editingText && rootOf(model, baseId(editingText)) === id}
               />
@@ -718,6 +800,14 @@ export function Canvas() {
       {model.roots.length === 0 && <EmptyCanvas />}
     </div>
   );
+}
+
+/** One wheel notch zooms ~1.2×; trackpad pinches (many small deltas) zoom smoothly. */
+const NOTCH_STEP = Math.log(1.2);
+function zoomFactor(e: WheelEvent): number {
+  const pixels = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 16 : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? e.deltaY * 400 : e.deltaY;
+  if (Math.abs(pixels) >= 50) return Math.exp(-Math.sign(pixels) * NOTCH_STEP);
+  return Math.exp(-pixels * 0.01);
 }
 
 function defaultFile(model: Model): string {
@@ -743,7 +833,7 @@ function EmptyCanvas() {
             Draw a frame <kbd>F</kbd>
           </button>
           <button className="btn" onClick={() => togglePanel("terminal", true)}>
-            Ask your agent <kbd>⌘J</kbd>
+            Ask your agent <kbd>{shortcut("mod+j")}</kbd>
           </button>
         </div>
       </div>

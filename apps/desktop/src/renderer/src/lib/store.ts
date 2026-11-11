@@ -53,6 +53,8 @@ export interface EditorState {
   panels: { layers: boolean; properties: boolean; terminal: boolean };
   leftTab: "layers" | "files" | "components";
   canvasMode: TokenMode;
+  /** Editor-only prop values for previewing a main component's variants; never saved. */
+  previewProps: Record<string, Record<string, string | boolean>>;
   undoStack: HistoryEntry[];
   redoStack: HistoryEntry[];
   pending: number;
@@ -81,6 +83,7 @@ interface EditorActions {
   toggleSidebars(): void;
   setLeftTab(tab: EditorState["leftTab"]): void;
   setCanvasMode(mode: TokenMode): void;
+  setPreviewProp(componentId: string, prop: string, value: string | boolean | undefined): void;
   toast(toast: Omit<Toast, "id">): void;
   dismissToast(id: number): void;
   setEditingText(id: string | null): void;
@@ -143,6 +146,7 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
     panels: { layers: true, properties: true, terminal: false },
     leftTab: "layers",
     canvasMode: "light",
+    previewProps: {},
     undoStack: [],
     redoStack: [],
     pending: 0,
@@ -186,7 +190,18 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
         redoStack: [],
       }));
       get().ensureIcons();
+      const errorKey = (issue: ProjectIssue) => `${issue.file}|${issue.nodeId}|${issue.code}|${issue.message}`;
+      const before = new Set(get().issues.filter((i) => i.severity === "error").map(errorKey));
       await send(changes);
+      const added = get().issues.filter((i) => i.severity === "error" && !before.has(errorKey(i)));
+      if (added.length) {
+        get().toast({
+          tone: "warn",
+          title: `${label} left ${added.length} validation error${added.length === 1 ? "" : "s"}`,
+          message: added[0]!.message,
+          action: { label: "Undo", run: () => get().undo() },
+        });
+      }
     },
 
     undo() {
@@ -275,6 +290,16 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
       }),
     setLeftTab: (leftTab) => set({ leftTab, panels: { ...get().panels, layers: true } }),
     setCanvasMode: (canvasMode) => set({ canvasMode }),
+    setPreviewProp: (componentId, prop, value) =>
+      set((s) => {
+        const props = { ...s.previewProps[componentId] };
+        if (value === undefined) delete props[prop];
+        else props[prop] = value;
+        const previewProps = { ...s.previewProps };
+        if (Object.keys(props).length) previewProps[componentId] = props;
+        else delete previewProps[componentId];
+        return { previewProps };
+      }),
 
     toast(toast) {
       const id = ++toastId;

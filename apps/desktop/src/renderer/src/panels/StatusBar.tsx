@@ -15,7 +15,7 @@ export function StatusBar() {
         Watching {count} file{count === 1 ? "" : "s"} · {state}
         {invalid ? ` · ${invalid} invalid` : ""}
       </span>
-      <span className="muted">
+      <span className="muted status-optional">
         <Palette size={13} /> {snapshot?.tokens.adapter} · {Object.keys(snapshot?.tokens.tokens ?? {}).length} tokens
       </span>
       {errors > 0 && <span className="badge badge-danger">{errors} problem{errors === 1 ? "" : "s"}</span>}
@@ -23,12 +23,12 @@ export function StatusBar() {
       <span className="muted">
         <MousePointer2 size={13} /> {selection.length} selected
       </span>
-      {first && (
-        <span className="muted">
+      {first && (first.parentId === undefined || first.style?.position === "absolute") && (
+        <span className="muted status-optional">
           <Move size={13} /> x {first.x ?? first.style?.left ?? 0} y {first.y ?? first.style?.top ?? 0}
         </span>
       )}
-      <span className="muted">
+      <span className="muted status-optional">
         {canvasMode === "light" ? <Sun size={13} /> : <Moon size={13} />} {canvasMode}
       </span>
     </div>

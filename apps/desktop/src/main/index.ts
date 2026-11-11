@@ -2,7 +2,7 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
-import { findProjectRoot } from "@lamsa/core";
+import { findProjectRoot, lucideIconNames } from "@lamsa/core";
 import type { NodeChange, OpenRequest, RecentProject, WelcomeState } from "../shared/api.js";
 import { ProjectService } from "./project-service.js";
 import { openExternalTerminal, TerminalSession } from "./terminal.js";
@@ -67,7 +67,7 @@ function createWindow() {
   window = new BrowserWindow({
     width: 1440,
     height: 900,
-    minWidth: 960,
+    minWidth: 800,
     minHeight: 600,
     backgroundColor: "#ECEAE5",
     title: "lamsa",
@@ -127,6 +127,7 @@ function registerIpc() {
 
   ipcMain.handle("apply-changes", (_event, changes: NodeChange[]) => service.applyChanges(changes));
   ipcMain.handle("icons", (_event, names: string[]) => service.icons(names));
+  ipcMain.handle("icon-names", () => [...lucideIconNames()].sort());
   ipcMain.handle("set-selection", (_event, selection: string[], file?: string) => service.setSelection(selection, file));
 
   ipcMain.handle("render", async (_event, ids: string[], mode?: "light" | "dark") => {

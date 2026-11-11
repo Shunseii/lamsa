@@ -1,4 +1,6 @@
-import { deleteSubtrees, duplicate, fromNested, groupIntoFrame, insertNodes, toNested, topmost } from "./edits";
+import type { DesignNode } from "@lamsa/schema";
+import type { NodeChange } from "../../../shared/api";
+import { deleteSubtrees, detachInstance, duplicate, fromNested, groupIntoFrame, insertNodes, toNested, topmost } from "./edits";
 import { useEditor } from "./store";
 import { fitTo, zoomBy, zoomTo } from "./viewport";
 
@@ -18,7 +20,9 @@ export type CommandName =
   | "zoom-in"
   | "zoom-out"
   | "undo"
-  | "redo";
+  | "redo"
+  | "go-to-main"
+  | "detach";
 
 export async function runCommand(name: CommandName): Promise<void> {
   const state = useEditor.getState();
@@ -117,7 +121,34 @@ export async function runCommand(name: CommandName): Promise<void> {
     case "redo":
       state.redo();
       return;
+    case "go-to-main": {
+      const node = model.nodes[selection[0] ?? ""];
+      if (node?.type !== "instance") return;
+      select([node.componentId]);
+      requestAnimationFrame(() => fitTo("selection"));
+      return;
+    }
+    case "detach": {
+      const ids = selection.filter((id) => model.nodes[id]?.type === "instance");
+      if (!ids.length) return;
+      await commit("Detach instance", ids.flatMap((id) => detachInstance(model, id)));
+      return;
+    }
   }
+}
+
+/** Arrow keys: top-level frames move on the canvas, absolutely positioned layers move by left/top. */
+async function nudge(dx: number, dy: number): Promise<void> {
+  const { model, selection, commit } = useEditor.getState();
+  const numeric = (value: unknown) => (typeof value === "number" ? value : typeof value === "string" && /^-?\d+(\.\d+)?(px)?$/.test(value) ? Number.parseFloat(value) : 0);
+  const changes = topmost(model, selection).flatMap((id): NodeChange[] => {
+    const node = model.nodes[id]!;
+    if (node.parentId === undefined) return [{ file: model.fileOf.get(id)!, id, node: { ...node, x: (node.x ?? 0) + dx, y: (node.y ?? 0) + dy } as DesignNode }];
+    if (node.style?.position !== "absolute") return [];
+    const style = { ...node.style, left: numeric(node.style.left) + dx, top: numeric(node.style.top) + dy };
+    return [{ file: model.fileOf.get(id)!, id, node: { ...node, style } as DesignNode }];
+  });
+  if (changes.length) await commit("Nudge", changes);
 }
 
 export function installShortcuts(): () => void {
@@ -171,6 +202,14 @@ export function installShortcuts(): () => void {
     if (e.shiftKey && (e.key === ")" || e.code === "Digit0")) return run("zoom-100");
     if (e.shiftKey && e.code === "Digit1") return run("zoom-fit");
     if (e.shiftKey && e.code === "Digit2") return run("zoom-selection");
+    if (key.startsWith("arrow") && !e.altKey) {
+      e.preventDefault();
+      const step = e.shiftKey ? 10 : 1;
+      const dx = key === "arrowleft" ? -step : key === "arrowright" ? step : 0;
+      const dy = key === "arrowup" ? -step : key === "arrowdown" ? step : 0;
+      void nudge(dx, dy);
+      return;
+    }
     if (key === "backspace" || key === "delete") return run("delete");
     if (key === "escape") {
       if (state.picker) return state.setPicker(false);

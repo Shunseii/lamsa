@@ -14,11 +14,13 @@ import {
   Sun,
   Type,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { insertNodes, newId } from "../lib/edits";
 import { api, useEditor, type Tool } from "../lib/store";
 import { fitTo, zoomBy, zoomTo } from "../lib/viewport";
+import { shortcut } from "../lib/keys";
 import { LogoMark } from "./LogoMark";
+import { Popover } from "./Popover";
 
 export function Tip({ label, keys, hint, children }: { label: string; keys?: string; hint?: [string, string]; children: ReactNode }) {
   return (
@@ -68,6 +70,8 @@ export async function insertImage() {
 export function Toolbar() {
   const { snapshot, tool, setTool, panels, togglePanel, canvasMode, setCanvasMode, viewport, selection, model, toast } = useEditor();
   const [zoomOpen, setZoomOpen] = useState(false);
+  const zoomButton = useRef<HTMLButtonElement>(null);
+  const closeZoom = useCallback(() => setZoomOpen(false), []);
   const [rendering, setRendering] = useState(false);
   const file = useEditor((s) => (s.selection[0] ? s.model.fileOf.get(s.selection[0]) : Object.keys(s.files)[0]));
 
@@ -106,12 +110,18 @@ export function Toolbar() {
   };
 
   return (
-    <>
+    <div className="topbar">
       <div className="bar bar-project">
         <LogoMark />
         <span className="project-name">{snapshot?.name}</span>
         <span className="crumb-sep">›</span>
         <span className="crumb mono">{file ?? "no files"}</span>
+        <span className="bar-divider" />
+        <Tip label={panels.layers ? "Hide layers" : "Show layers"} keys={shortcut("mod+[")} hint={["Both sidebars", shortcut("mod+\\")]}>
+          <button className={`icon-btn ${panels.layers ? "is-active" : ""}`} onClick={() => togglePanel("layers")} aria-label="Toggle layers">
+            <PanelLeft size={16} />
+          </button>
+        </Tip>
       </div>
 
       <div className="bar bar-tools">
@@ -127,23 +137,23 @@ export function Toolbar() {
       <div className="bar bar-view">
         <div className="segmented">
           <button className={canvasMode === "light" ? "is-on" : ""} onClick={() => setCanvasMode("light")}>
-            <Sun size={14} /> Light
+            <Sun size={14} /> <span className="wide-only">Light</span>
           </button>
           <button className={canvasMode === "dark" ? "is-on" : ""} onClick={() => setCanvasMode("dark")}>
-            <Moon size={14} /> Dark
+            <Moon size={14} /> <span className="wide-only">Dark</span>
           </button>
         </div>
         <div className="zoom">
-          <button className="ghost-btn" onClick={() => setZoomOpen(!zoomOpen)}>
+          <button ref={zoomButton} className="ghost-btn" onClick={() => setZoomOpen(!zoomOpen)}>
             {Math.round(viewport.zoom * 100)}% <ChevronDown size={14} />
           </button>
           {zoomOpen && (
-            <div className="menu zoom-menu" onMouseLeave={() => setZoomOpen(false)}>
+            <Popover anchor={zoomButton.current} width={220} onClose={closeZoom}>
               {[
-                ["Zoom in", "⌘ +", () => zoomBy(1.25)],
-                ["Zoom out", "⌘ −", () => zoomBy(0.8)],
-                ["Zoom to fit all files", "⇧ 1", () => fitTo("all")],
-                ["Zoom to selection", "⇧ 2", () => fitTo("selection")],
+                ["Zoom in", shortcut("mod+="), () => zoomBy(1.25)],
+                ["Zoom out", shortcut("mod+-"), () => zoomBy(0.8)],
+                ["Zoom to fit all files", shortcut("shift+1"), () => fitTo("all")],
+                ["Zoom to selection", shortcut("shift+2"), () => fitTo("selection")],
               ].map(([label, keys, run]) => (
                 <button key={label as string} className="menu-item" onClick={() => { (run as () => void)(); setZoomOpen(false); }}>
                   {label as string}
@@ -153,31 +163,26 @@ export function Toolbar() {
               <div className="menu-sep" />
               {[0.5, 1, 2].map((z) => (
                 <button key={z} className="menu-item" onClick={() => { zoomTo(z); setZoomOpen(false); }}>
-                  {z * 100}%{z === 1 && <kbd>⇧ 0</kbd>}
+                  {z * 100}%{z === 1 && <kbd>{shortcut("shift+0")}</kbd>}
                 </button>
               ))}
-            </div>
+            </Popover>
           )}
         </div>
-        <Tip label={panels.layers ? "Hide layers" : "Show layers"} keys="⌘[" hint={["Both sidebars", "⌘\\"]}>
-          <button className={`icon-btn ${panels.layers ? "is-active" : ""}`} onClick={() => togglePanel("layers")} aria-label="Toggle layers">
-            <PanelLeft size={16} />
-          </button>
-        </Tip>
-        <Tip label={panels.terminal ? "Hide agent terminal" : "Show agent terminal"} keys="⌘J">
+        <Tip label={panels.terminal ? "Hide agent terminal" : "Show agent terminal"} keys={shortcut("mod+j")}>
           <button className={`icon-btn ${panels.terminal ? "is-active" : ""}`} onClick={() => togglePanel("terminal")} aria-label="Toggle terminal">
             <SquareTerminal size={16} />
           </button>
         </Tip>
-        <Tip label={panels.properties ? "Hide properties" : "Show properties"} keys="⌘]" hint={["Both sidebars", "⌘\\"]}>
+        <Tip label={panels.properties ? "Hide properties" : "Show properties"} keys={shortcut("mod+]")} hint={["Both sidebars", shortcut("mod+\\")]}>
           <button className={`icon-btn ${panels.properties ? "is-active" : ""}`} onClick={() => togglePanel("properties")} aria-label="Toggle properties">
             <PanelRight size={16} />
           </button>
         </Tip>
         <button className="btn" onClick={() => void render()} disabled={rendering}>
-          <ImagePlay size={14} /> {rendering ? "Rendering…" : "Render"}
+          <ImagePlay size={14} /> <span className="wide-only">{rendering ? "Rendering…" : "Render"}</span>
         </button>
       </div>
-    </>
+    </div>
   );
 }

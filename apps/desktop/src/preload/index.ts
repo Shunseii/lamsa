@@ -14,6 +14,7 @@ const api: LamsaApi = {
   current: () => ipcRenderer.invoke("current"),
   applyChanges: (changes) => ipcRenderer.invoke("apply-changes", changes),
   icons: (names) => ipcRenderer.invoke("icons", names),
+  iconNames: () => ipcRenderer.invoke("icon-names"),
   setSelection: (selection, file) => ipcRenderer.invoke("set-selection", selection, file),
   render: (ids, mode) => ipcRenderer.invoke("render", ids, mode),
   importImage: () => ipcRenderer.invoke("import-image"),

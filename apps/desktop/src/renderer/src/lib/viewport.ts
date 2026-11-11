@@ -1,5 +1,5 @@
 import { findElement } from "../canvas/FrameView";
-import { rootOf } from "./model";
+import { rootOf, type Model } from "./model";
 import { useEditor } from "./store";
 
 function canvasBox(): DOMRect | undefined {
@@ -19,6 +19,17 @@ export function zoomBy(factor: number) {
   zoomTo(zoom);
 }
 
+/** The node's box, or its nearest ancestor's when the node itself isn't rendered (e.g. hidden). */
+function visibleRect(model: Model, id: string): DOMRect | null {
+  let current: string | undefined = id;
+  while (current) {
+    const rect = findElement(rootOf(model, current), current)?.getBoundingClientRect();
+    if (rect && (rect.width > 0 || rect.height > 0)) return rect;
+    current = model.nodes[current]?.parentId;
+  }
+  return null;
+}
+
 export function fitTo(target: "all" | "selection") {
   const { model, selection, viewport, setViewport, panels } = useEditor.getState();
   const box = canvasBox();
@@ -29,9 +40,8 @@ export function fitTo(target: "all" | "selection") {
   let right = -Infinity;
   let bottom = -Infinity;
   for (const id of ids) {
-    const element = findElement(rootOf(model, id), id);
-    if (!element) continue;
-    const rect = element.getBoundingClientRect();
+    const rect = visibleRect(model, id);
+    if (!rect) continue;
     const x = (rect.left - box.left - viewport.x) / viewport.zoom;
     const y = (rect.top - box.top - viewport.y) / viewport.zoom;
     left = Math.min(left, x);

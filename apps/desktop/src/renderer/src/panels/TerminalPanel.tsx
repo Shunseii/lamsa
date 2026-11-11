@@ -24,7 +24,7 @@ export function TerminalPanel() {
       fontSize: 13,
       lineHeight: 1.35,
       cursorBlink: true,
-      theme: { background: "#fbfaf8", foreground: "#1f1d1b", cursor: "#c8462a", selectionBackground: "#f3d8cf", black: "#1f1d1b", brightBlack: "#8c8a85", green: "#1e7f4a", red: "#be3329", yellow: "#9a6412", blue: "#2f5fa7", magenta: "#8e3fa0", cyan: "#1d7a80", white: "#e9e6df" },
+      theme: { background: "#fbfaf8", foreground: "#1f1d1b", cursor: "#1f5fa8", selectionBackground: "#d3e1f2", black: "#1f1d1b", brightBlack: "#8c8a85", green: "#1e7f4a", red: "#be3329", yellow: "#9a6412", blue: "#2f5fa7", magenta: "#8e3fa0", cyan: "#1d7a80", white: "#e9e6df" },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);

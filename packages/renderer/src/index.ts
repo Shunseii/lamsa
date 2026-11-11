@@ -32,6 +32,8 @@ export interface RenderOptions {
   canvasMode?: TokenMode;
   iconSvg: (name: string) => string | undefined;
   assetUrl?: (src: string) => string;
+  /** When the root is a main component, render it with these prop values instead of its defaults. */
+  componentProps?: Record<string, string | boolean>;
 }
 
 export interface RenderResult {
@@ -302,7 +304,7 @@ export function buildRenderTree(options: RenderOptions): RenderResult {
   };
   let root: RenderElement;
   if (node.type === "frame" && node.component) {
-    const defaults = instancePatches({ type: "instance", componentId: options.rootId }, node);
+    const defaults = instancePatches({ type: "instance", componentId: options.rootId, props: options.componentProps }, node);
     const own = applyPatch(node, defaults.get(options.rootId));
     root = renderFrameLike({
       id: options.rootId,

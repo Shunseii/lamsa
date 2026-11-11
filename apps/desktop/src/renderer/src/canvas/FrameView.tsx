@@ -22,10 +22,11 @@ interface Props {
   canvasMode: TokenMode;
   version: number;
   frozen: boolean;
+  componentProps?: Record<string, string | boolean>;
 }
 
 /** Renders one top-level frame into its own shadow root, isolated from the editor's CSS. */
-export const FrameView = memo(function FrameView({ id, nodes, tokens, icons, canvasMode, version, frozen }: Props) {
+export const FrameView = memo(function FrameView({ id, nodes, tokens, icons, canvasMode, version, frozen, componentProps }: Props) {
   const host = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -48,9 +49,10 @@ export const FrameView = memo(function FrameView({ id, nodes, tokens, icons, can
       canvasMode,
       iconSvg: (name) => icons[name] || undefined,
       assetUrl,
+      componentProps,
     });
     root.innerHTML = `<style>${shadowCss(tokens)}</style><div class="lamsa-surface ${result.mode}">${toHtml(result.root)}</div>`;
-  }, [id, nodes, tokens, icons, canvasMode, version, frozen]);
+  }, [id, nodes, tokens, icons, canvasMode, version, frozen, componentProps]);
 
   return <div ref={host} className="frame-host" data-root-id={id} />;
 });

@@ -121,26 +121,80 @@ export interface FileRegion {
   top: number;
 }
 
-/** Files sit side by side on the canvas; each file's own x/y are offset by `dx`. */
-export function fileRegions(model: Model): Map<string, FileRegion> {
+const FILE_GAP = 200;
+const placedOffsets = new Map<string, number>();
+let placedProject: string | undefined;
+
+/**
+ * Files sit side by side on the canvas; each file's own x/y are offset by `dx`.
+ * A file keeps the offset it got when it first appeared, so moving its frames
+ * never shifts the file (or the files next to it) under the pointer.
+ */
+export function fileRegions(model: Model, project?: string): Map<string, FileRegion> {
+  if (project !== placedProject) {
+    placedOffsets.clear();
+    placedProject = project;
+  }
+  const extents = new Map<string, { minX: number; maxX: number; minY: number }>();
+  for (const id of model.roots) {
+    const file = model.fileOf.get(id)!;
+    const node = model.nodes[id]!;
+    const width = typeof node.style?.width === "number" ? node.style.width : 400;
+    const extent = extents.get(file) ?? { minX: Infinity, maxX: -Infinity, minY: Infinity };
+    extent.minX = Math.min(extent.minX, node.x ?? 0);
+    extent.maxX = Math.max(extent.maxX, (node.x ?? 0) + width);
+    extent.minY = Math.min(extent.minY, node.y ?? 0);
+    extents.set(file, extent);
+  }
+  let right = -Infinity;
+  for (const [file, extent] of extents) {
+    const dx = placedOffsets.get(file);
+    if (dx !== undefined) right = Math.max(right, extent.maxX + dx);
+  }
   const regions = new Map<string, FileRegion>();
-  const files = [...new Set(model.roots.map((id) => model.fileOf.get(id)!))];
-  let cursor = 0;
-  for (const file of files) {
-    const roots = model.roots.filter((id) => model.fileOf.get(id) === file);
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    for (const id of roots) {
-      const node = model.nodes[id]!;
-      const width = typeof node.style?.width === "number" ? node.style.width : 400;
-      minX = Math.min(minX, node.x ?? 0);
-      maxX = Math.max(maxX, (node.x ?? 0) + width);
-      minY = Math.min(minY, node.y ?? 0);
+  for (const [file, extent] of extents) {
+    let dx = placedOffsets.get(file);
+    if (dx === undefined) {
+      dx = (right === -Infinity ? 0 : right + FILE_GAP) - extent.minX;
+      placedOffsets.set(file, dx);
+      right = extent.maxX + dx;
     }
-    const dx = cursor - minX;
-    regions.set(file, { file, dx, left: cursor, top: minY });
-    cursor += maxX - minX + 200;
+    regions.set(file, { file, dx, left: extent.minX + dx, top: extent.minY });
   }
   return regions;
+}
+
+export interface DefaultHidden {
+  componentId: string;
+  prop: string;
+  /** The prop's default, which hides the layer. */
+  value: string | boolean;
+  /** A prop value that shows the layer, when one exists. */
+  showWith?: string | boolean;
+}
+
+/**
+ * Why a layer inside a main component is invisible on the canvas: the component's default
+ * props hide it (or one of its ancestors). Instances that pick another value still show it.
+ */
+export function hiddenByDefault(model: Model, id: string, preview: Record<string, string | boolean> = {}): DefaultHidden | null {
+  const componentId = rootOf(model, id);
+  const component = model.nodes[componentId];
+  if (component?.type !== "frame" || !component.component) return null;
+  const chain = [id, ...ancestorsOf(model, id)];
+  const hides = (patches: Record<string, { hidden?: boolean }> | undefined) => chain.some((n) => patches?.[n]?.hidden);
+  for (const [prop, def] of Object.entries(component.component.props ?? {})) {
+    if (def.type === "boolean") {
+      const current = typeof preview[prop] === "boolean" ? (preview[prop] as boolean) : def.default;
+      if (!hides(current ? def.overrides?.true : def.overrides?.false)) continue;
+      const other = !current;
+      return { componentId, prop, value: current, showWith: hides(other ? def.overrides?.true : def.overrides?.false) ? undefined : other };
+    }
+    if (def.type === "enum") {
+      const current = typeof preview[prop] === "string" ? (preview[prop] as string) : def.default;
+      if (!hides(def.overrides?.[current])) continue;
+      return { componentId, prop, value: current, showWith: def.options.find((option) => !hides(def.overrides?.[option])) };
+    }
+  }
+  return null;
 }

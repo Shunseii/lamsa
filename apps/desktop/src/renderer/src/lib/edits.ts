@@ -120,24 +120,28 @@ export function topmost(model: Model, ids: string[]): string[] {
   });
 }
 
+/** Points a copied component's prop targets and overrides at the copies of its inner nodes. Mutates `node`. */
+function remapComponentRefs(node: DesignNode, mapping: Map<string, string>): DesignNode {
+  if (node.type !== "frame" || !node.component) return node;
+  for (const prop of Object.values(node.component.props ?? {})) {
+    if (prop.type === "text") prop.target = mapping.get(prop.target) ?? prop.target;
+    const groups = prop.type === "enum" ? prop.overrides : prop.type === "boolean" ? prop.overrides : undefined;
+    for (const [key, patches] of Object.entries(groups ?? {})) {
+      if (!patches) continue;
+      (groups as Record<string, Record<string, unknown>>)[key] = Object.fromEntries(
+        Object.entries(patches).map(([target, patch]) => [mapping.get(target) ?? target, patch]),
+      );
+    }
+  }
+  return node;
+}
+
 export function cloneSubtree(model: Model, id: string, taken = new Set<string>()): { root: NewNode; descendants: NewNode[] } {
   const mapping = new Map<string, string>([[id, newId(model, taken)]]);
   for (const d of descendantsOf(model, id)) mapping.set(d, newId(model, taken));
   const remap = (node: DesignNode): DesignNode => {
-    const next = structuredClone(node);
+    const next = remapComponentRefs(structuredClone(node), mapping);
     if (next.parentId && mapping.has(next.parentId)) next.parentId = mapping.get(next.parentId);
-    if (next.type === "frame" && next.component) {
-      for (const prop of Object.values(next.component.props ?? {})) {
-        if (prop.type === "text") prop.target = mapping.get(prop.target) ?? prop.target;
-        const groups = prop.type === "enum" ? prop.overrides : prop.type === "boolean" ? prop.overrides : undefined;
-        for (const [key, patches] of Object.entries(groups ?? {})) {
-          if (!patches) continue;
-          (groups as Record<string, Record<string, unknown>>)[key] = Object.fromEntries(
-            Object.entries(patches).map(([target, patch]) => [mapping.get(target) ?? target, patch]),
-          );
-        }
-      }
-    }
     return next;
   };
   const root = { id: mapping.get(id)!, node: remap(model.nodes[id]!) };
@@ -202,6 +206,43 @@ export function reparent({
   return changes;
 }
 
+/** Moves `ids` (in the given order) into `parentId` before `beforeId`, keeping each subtree together. */
+export function reparentMany({
+  model,
+  ids,
+  parentId,
+  beforeId,
+}: {
+  model: Model;
+  ids: string[];
+  parentId: string;
+  beforeId: string | null;
+}): NodeChange[] {
+  const parent = model.nodes[parentId];
+  if (parent?.type !== "frame") return [];
+  const moving = ids.filter((id) => model.nodes[id] && id !== parentId && !descendantsOf(model, id).includes(parentId));
+  if (!moving.length) return [];
+  const { low, high } = siblingKeyRange(model, parentId, beforeId, new Set(moving));
+  const keys = generateNKeysBetween(low, high, moving.length);
+  const toFile = model.fileOf.get(parentId)!;
+  const changes: NodeChange[] = [];
+  moving.forEach((id, i) => {
+    const moved = { ...model.nodes[id]!, parentId, index: keys[i]! } as DesignNode;
+    delete moved.x;
+    delete moved.y;
+    const fromFile = model.fileOf.get(id)!;
+    if (fromFile === toFile) {
+      changes.push(change(model, id, moved, toFile));
+      return;
+    }
+    changes.push({ file: fromFile, id, node: null }, { file: toFile, id, node: moved });
+    for (const d of descendantsOf(model, id)) {
+      changes.push({ file: fromFile, id: d, node: null }, { file: toFile, id: d, node: model.nodes[d]! });
+    }
+  });
+  return changes;
+}
+
 export function groupIntoFrame(model: Model, ids: string[]): { changes: NodeChange[]; frameId?: string } {
   const picked = topmost(model, ids);
   const parentId = model.nodes[picked[0]!]?.parentId;
@@ -262,16 +303,18 @@ type Nested = Record<string, unknown> & { children?: Nested[] };
 export function toNested(model: Model, id: string): Nested {
   const { parentId: _p, index: _i, ...rest } = model.nodes[id]!;
   const children = childrenOf(model, id).map((child) => toNested(model, child));
-  return { ...rest, ...(children.length ? { children } : {}) };
+  return { id, ...rest, ...(children.length ? { children } : {}) };
 }
 
 export function fromNested(model: Model, input: Nested[]): { root: NewNode; descendants: NewNode[] }[] {
   const taken = new Set<string>();
   return input.map((entry) => {
     const descendants: NewNode[] = [];
+    const mapping = new Map<string, string>();
     const visit = (value: Nested, parent: string | undefined): string => {
-      const { children, id: _id, parentId: _p, index: _i, ...rest } = value as Nested & { id?: string; parentId?: string; index?: string };
+      const { children, id: sourceId, parentId: _p, index: _i, ...rest } = value as Nested & { id?: string; parentId?: string; index?: string };
       const id = newId(model, taken);
+      if (typeof sourceId === "string") mapping.set(sourceId, id);
       const kids = Array.isArray(children) ? children : [];
       const keys = generateNKeysBetween(null, null, kids.length);
       const node = { ...rest } as DesignNode;
@@ -288,6 +331,6 @@ export function fromNested(model: Model, input: Nested[]): { root: NewNode; desc
     };
     let rootNode: NewNode | undefined;
     visit(entry, undefined);
-    return { root: rootNode!, descendants };
+    return { root: { ...rootNode!, node: remapComponentRefs(structuredClone(rootNode!.node), mapping) }, descendants };
   });
 }

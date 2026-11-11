@@ -1,8 +1,8 @@
 import type { DesignNode } from "@lamsa/schema";
 import { ChevronRight, Component, EyeOff, FileJson, Frame, Image as ImageIcon, Search, Shapes, Type } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { reparent } from "../lib/edits";
-import { childrenOf, descendantsOf, isComponent, nodeTitle } from "../lib/model";
+import { childrenOf, descendantsOf, hiddenByDefault, isComponent, nodeTitle, rootOf } from "../lib/model";
 import { useEditor } from "../lib/store";
 import { fitTo } from "../lib/viewport";
 import { insertInstance } from "./ComponentPicker";
@@ -36,11 +36,12 @@ export function LayersPanel() {
 }
 
 function LayersTree() {
-  const { model, selection, select, files, setHover, commit } = useEditor();
+  const { model, selection, select, files, setHover, commit, previewProps } = useEditor();
   const [filter, setFilter] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [dragging, setDragging] = useState<string | null>(null);
   const [drop, setDrop] = useState<Drop>(null);
+  const anchor = useRef<string | null>(null);
 
   const matches = useMemo(() => {
     if (!filter) return null;
@@ -78,6 +79,18 @@ function LayersTree() {
     void commit("Move layer", changes);
   };
 
+  /** Layer ids in the order their rows appear, skipping collapsed and filtered-out rows. */
+  const visibleOrder = (): string[] => {
+    const order: string[] = [];
+    const walk = (id: string) => {
+      if (!model.nodes[id] || (matches && !matches.has(id))) return;
+      order.push(id);
+      if (!collapsed.has(id) || matches !== null) for (const kid of childrenOf(model, id)) walk(kid);
+    };
+    for (const path of Object.keys(files).sort()) for (const id of model.roots) if (model.fileOf.get(id) === path) walk(id);
+    return order;
+  };
+
   const row = (id: string, depth: number): React.ReactNode => {
     const node = model.nodes[id];
     if (!node || (matches && !matches.has(id))) return null;
@@ -85,10 +98,11 @@ function LayersTree() {
     const open = !collapsed.has(id) || (matches !== null);
     const selected = selection.includes(id);
     const dropHere = drop?.id === id ? drop.where : null;
+    const defaultHidden = hiddenByDefault(model, id, previewProps[rootOf(model, id)]);
     return (
       <div key={id}>
         <div
-          className={`layer-row ${selected ? "is-selected" : ""} ${dropHere ? `drop-${dropHere}` : ""} ${node.hidden ? "is-hidden" : ""}`}
+          className={`layer-row ${selected ? "is-selected" : ""} ${dropHere ? `drop-${dropHere}` : ""} ${node.hidden || defaultHidden ? "is-hidden" : ""}`}
           style={{ paddingLeft: 8 + depth * 14 }}
           draggable
           onDragStart={(e) => {
@@ -115,10 +129,27 @@ function LayersTree() {
           onMouseEnter={() => setHover(id)}
           onMouseLeave={() => setHover(null)}
           onClick={(e) => {
-            if (e.shiftKey) select(selected ? selection.filter((s) => s !== id) : [...selection, id]);
+            if (e.shiftKey) {
+              const order = visibleOrder();
+              const from = order.indexOf(anchor.current ?? selection.at(-1) ?? id);
+              const to = order.indexOf(id);
+              if (from === -1 || to === -1) select([id]);
+              else select(order.slice(Math.min(from, to), Math.max(from, to) + 1));
+              return;
+            }
+            anchor.current = id;
+            if (e.ctrlKey || e.metaKey) select(selected ? selection.filter((s) => s !== id) : [...selection, id]);
             else select([id]);
           }}
           onDoubleClick={() => fitTo("selection")}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            if (!selected) {
+              anchor.current = id;
+              select([id]);
+            }
+            useEditor.getState().setContextMenu({ x: e.clientX, y: e.clientY });
+          }}
         >
           <span
             className={`twisty ${kids.length ? "" : "is-empty"} ${open ? "is-open" : ""}`}
@@ -134,7 +165,15 @@ function LayersTree() {
           </span>
           <NodeIcon node={node} />
           <span className="layer-name">{nodeTitle(id, node)}</span>
-          {node.hidden && <EyeOff size={12} className="muted" />}
+          {node.hidden ? (
+            <EyeOff size={12} className="muted" />
+          ) : (
+            defaultHidden && (
+              <span className="layer-meta" title={`Hidden while ${defaultHidden.prop} = ${String(defaultHidden.value)}`}>
+                <EyeOff size={12} />
+              </span>
+            )
+          )}
           {node.type === "instance" && <span className="layer-meta">{nodeTitle(node.componentId, model.nodes[node.componentId])}</span>}
         </div>
         {open && kids.map((kid) => row(kid, depth + 1))}

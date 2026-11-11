@@ -75,6 +75,8 @@ export interface LamsaApi {
   current(): Promise<ProjectSnapshot | null>;
   applyChanges(changes: NodeChange[]): Promise<{ ok: boolean; error?: string; issues: ProjectIssue[] }>;
   icons(names: string[]): Promise<Record<string, string>>;
+  /** Every lucide icon name, sorted. */
+  iconNames(): Promise<string[]>;
   setSelection(selection: string[], file?: string): Promise<void>;
   render(ids: string[], mode?: "light" | "dark"): Promise<RenderResultSummary[]>;
   importImage(): Promise<{ src: string } | null>;
