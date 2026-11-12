@@ -1,0 +1,28 @@
+{
+  "agent": {
+    "args": [],
+    "command": "claude"
+  },
+  "assetsDir": "designs/assets",
+  "designs": [
+    "designs/**/*.lamsa.json"
+  ],
+  "fonts": {
+    "Geist": {
+      "google": "Geist:wght@400..700"
+    },
+    "Geist Mono": {
+      "google": "Geist Mono:wght@400;500"
+    },
+    "Instrument Serif": {
+      "google": "Instrument Serif:ital@0"
+    },
+    "IBM Plex Sans Arabic": {
+      "google": "IBM Plex Sans Arabic:wght@600"
+    }
+  },
+  "tokens": {
+    "adapter": "shadcn-tailwind4",
+    "path": "apps/desktop/src/renderer/src/styles.css"
+  }
+}
