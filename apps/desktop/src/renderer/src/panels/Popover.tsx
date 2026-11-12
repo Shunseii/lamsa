@@ -15,12 +15,23 @@ interface Placement {
  * Closes a floating menu on Escape or a click outside it. That outside click only closes the menu:
  * it never reaches the canvas or panels underneath, so it can't change the selection.
  */
+/** The click that closes a menu shouldn't also press whatever was under it (e.g. a section header). */
+function swallowNextClick() {
+  const swallow = (e: MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+  };
+  window.addEventListener("click", swallow, { capture: true, once: true });
+  window.addEventListener("pointerdown", () => window.removeEventListener("click", swallow, true), { capture: true, once: true });
+}
+
 export function useDismiss({ ref, anchor, onClose }: { ref: React.RefObject<HTMLElement | null>; anchor?: HTMLElement | null; onClose: () => void }) {
   useLayoutEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as Node;
       if (ref.current?.contains(target) || anchor?.contains(target)) return;
       e.stopPropagation();
+      swallowNextClick();
       onClose();
     };
     const onKey = (e: KeyboardEvent) => {

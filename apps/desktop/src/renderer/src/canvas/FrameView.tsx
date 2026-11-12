@@ -11,7 +11,7 @@ export function assetUrl(src: string): string {
 }
 
 function shadowCss(tokens: TokenSet): string {
-  return `${baseCss(tokens)}\n${tokens.css.replace(/:root\b/g, ":host")}\n:host { display: block; }\n`;
+  return `${baseCss(tokens)}\n${tokens.css.replace(/:root\b/g, ":host")}\n:host { display: block; }\n::selection { background: rgba(31, 95, 168, 0.22); }\n[contenteditable]:focus { outline: none; }\n`;
 }
 
 interface Props {

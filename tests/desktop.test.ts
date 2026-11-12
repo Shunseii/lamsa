@@ -488,6 +488,8 @@ describe("desktop editor selection and moving", () => {
     expect((await rect("BtnIcon1")).w).toBe(0);
     await props.getByRole("group", { name: "icon variant" }).getByText("true", { exact: true }).click();
     await expect.poll(async () => (await rect("BtnIcon1")).w).toBeGreaterThan(0);
+    const outlineWidth = () => win.locator(".ov-selection").first().evaluate((el) => el.getBoundingClientRect().width);
+    await expect.poll(async () => Math.round((await outlineWidth()) - (await rect("Btn00001")).w)).toBe(0);
     await props.getByRole("group", { name: "variant variant" }).getByText("outline", { exact: true }).click();
     expect(JSON.stringify(nodes("components.lamsa.json"))).toBe(fileBefore);
     await props.getByText("Make default").last().click();
@@ -699,6 +701,53 @@ describe("desktop editor selection and moving", () => {
     await picker.waitFor();
     await win.keyboard.press("Escape");
     await picker.waitFor({ state: "detached" });
+  });
+
+  it("drags a selected frame from over its children, and a plain click still selects the child", async () => {
+    const file = join(selRoot, "designs", "checkout.lamsa.json");
+    const data = JSON.parse(readFileSync(file, "utf8")) as { nodes: Record<string, unknown> };
+    data.nodes.Chip0001 = { type: "frame", name: "Chip", x: 0, y: 1500, style: { display: "flex" } };
+    data.nodes.ChipText1 = { type: "text", name: "Chip label", parentId: "Chip0001", index: "a0", content: "Fills the chip" };
+    writeFileSync(file, JSON.stringify(data, null, 2));
+    const layers = win.getByTestId("layers-panel");
+    await layers.getByText("Chip", { exact: true }).click();
+    await expect.poll(selected).toEqual(["Chip"]);
+    await win.keyboard.press("Shift+Digit2");
+    await win.waitForTimeout(200);
+    const text = await rect("ChipText1");
+    await win.mouse.move(text.cx, text.cy);
+    await win.mouse.down();
+    await win.mouse.move(text.cx + 60, text.cy + 30, { steps: 8 });
+    await win.mouse.up();
+    await expect.poll(() => nodes().Chip0001?.x as number).toBeGreaterThan(20);
+    expect(nodes().ChipText1).toMatchObject({ parentId: "Chip0001" });
+    await expect.poll(selected).toEqual(["Chip"]);
+    const moved = await rect("ChipText1");
+    await win.mouse.click(moved.cx, moved.cy);
+    await expect.poll(selected).toEqual(["Chip label"]);
+  });
+
+  it("shows flex and grid fields only where they apply", async () => {
+    const labels = () =>
+      win.getByTestId("properties-panel").locator(".field-label").evaluateAll((els) => els.map((el) => el.textContent?.trim()));
+    const layers = win.getByTestId("layers-panel");
+    await layers.getByText("Form", { exact: true }).first().click();
+    await expect.poll(labels).toEqual(expect.arrayContaining(["flex-direction", "justify-content", "align-items", "gap", "flex"]));
+    await layers.getByText("star", { exact: true }).first().click();
+    await expect.poll(selected).toEqual(["star"]);
+    const shown = await labels();
+    expect(shown).toContain("flex");
+    for (const label of ["flex-direction", "justify-content", "align-items", "gap"]) expect(shown).not.toContain(label);
+  });
+
+  it("closes an open dropdown without also toggling the section header that was clicked", async () => {
+    const props = win.getByTestId("properties-panel");
+    await win.getByTestId("layers-panel").getByText("Form", { exact: true }).first().click();
+    await props.getByRole("button", { name: "Choose overflow" }).click();
+    await win.getByTestId("options-menu").waitFor();
+    await props.getByRole("button", { name: "Appearance" }).click();
+    await win.getByTestId("options-menu").waitFor({ state: "detached" });
+    await expect.poll(() => props.locator(".field-label", { hasText: /^overflow$/ }).count()).toBe(1);
   });
 
   it("explains why layers can't be grouped", async () => {

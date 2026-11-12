@@ -166,9 +166,11 @@ export function parseShadcnTailwind4(css: string, options: { source?: string; de
     };
   }
 
+  // Tailwind's defaults come first so the project's own :root and @theme values win, as in Tailwind's cascade.
   const rootBlock = [
+    ...themeDecls.filter((decl) => decl.builtin),
     ...rootDecls,
-    ...themeDecls.filter((decl) => !decl.inline),
+    ...themeDecls.filter((decl) => !decl.inline && !decl.builtin),
     ...(lightScope.has("--spacing") ? [] : [{ name: "--spacing", value: "0.25rem" }]),
   ];
   const block = (selector: string, decls: Decl[]) =>

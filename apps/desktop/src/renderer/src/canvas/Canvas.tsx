@@ -20,7 +20,7 @@ const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 type Drag =
   | { kind: "pan"; startX: number; startY: number; origin: { x: number; y: number } }
   | { kind: "marquee"; start: { x: number; y: number }; current: { x: number; y: number }; additive: boolean }
-  | { kind: "pending-move"; start: { x: number; y: number }; id: string; collapse: boolean }
+  | { kind: "pending-move"; start: { x: number; y: number }; id: string; collapse: boolean; clickSelects?: string }
   | { kind: "move-roots"; start: { x: number; y: number }; ids: string[]; origins: Record<string, { x: number; y: number }>; startRects: Record<string, Rect | null>; delta: { x: number; y: number }; guides: Guide[] }
   | { kind: "move-absolute"; start: { x: number; y: number }; id: string; origin: { left: number; top: number }; delta: { x: number; y: number } }
   | { kind: "reorder"; start: { x: number; y: number }; ids: string[]; fromParent: string; parentId: string; beforeId: string | null; line: Rect | null }
@@ -122,7 +122,16 @@ export function Canvas() {
   useLayoutEffect(() => {
     const frame = requestAnimationFrame(() => setTick((t) => t + 1));
     return () => cancelAnimationFrame(frame);
-  }, [model, viewport, selection, renderVersion, icons, canvasMode]);
+  }, [model, viewport, selection, renderVersion, icons, canvasMode, previewProps]);
+
+  // Outlines follow frames that change size on their own (variant previews, late-loading fonts).
+  useEffect(() => {
+    const element = container.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => setTick((t) => t + 1));
+    element.querySelectorAll(".frame-host").forEach((host) => observer.observe(host));
+    return () => observer.disconnect();
+  }, [model]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -342,6 +351,21 @@ export function Canvas() {
     if (e.shiftKey) {
       store().select(selection.includes(id) ? selection.filter((s) => s !== id) : [...selection, id]);
       return;
+    }
+    // Like Figma: pressing inside a selected layer's box drags that layer, even over its children.
+    // A click without a drag still selects the child under the pointer.
+    if (!e.ctrlKey && !e.metaKey && !selection.includes(id)) {
+      const box = container.current!.getBoundingClientRect();
+      const local = { x: point.x - box.left, y: point.y - box.top };
+      const holder = selection.find((selected) => {
+        if (!isInside(id, selected)) return false;
+        const rect = screenRect(selected);
+        return !!rect && local.x >= rect.x && local.x <= rect.x + rect.w && local.y >= rect.y && local.y <= rect.y + rect.h;
+      });
+      if (holder) {
+        setDrag({ kind: "pending-move", start: point, id: holder, collapse: false, clickSelects: id });
+        return;
+      }
     }
     if (!selection.includes(id)) store().select([id]);
     setDrag({ kind: "pending-move", start: point, id, collapse: selection.length > 1 && selection.includes(id) });
@@ -565,7 +589,8 @@ export function Canvas() {
         );
         return;
       case "pending-move":
-        if (current.collapse) store().select([current.id]);
+        if (current.clickSelects) store().select([current.clickSelects]);
+        else if (current.collapse) store().select([current.id]);
         return;
       case "reorder": {
         if (!current.line) return;
@@ -787,14 +812,16 @@ export function Canvas() {
           const offset = frameOffset(id);
           return (
             <div key={id} className="frame-slot" style={{ left: (node.x ?? 0) + dxOf(id) + offset.x, top: (node.y ?? 0) + offset.y }}>
-              <div
-                className={cn("frame-label", { "is-selected": selection.includes(id) })}
-                data-label-for={id}
-                style={{ transform: `scale(${1 / viewport.zoom})` }}
-              >
-                {node.type === "frame" && node.component ? "◇ " : ""}
-                {nodeTitle(id, node)}
-              </div>
+              {node.type !== "text" && (
+                <div
+                  className={cn("frame-label", { "is-selected": selection.includes(id) })}
+                  data-label-for={id}
+                  style={{ transform: `scale(${1 / viewport.zoom})` }}
+                >
+                  {node.type === "frame" && node.component ? "◇ " : ""}
+                  {nodeTitle(id, node)}
+                </div>
+              )}
               <FrameView
                 id={id}
                 nodes={model.nodes}

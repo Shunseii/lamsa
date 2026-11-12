@@ -2,7 +2,7 @@ import type { DesignNode, Token, TokenKind } from "@lamsa/schema";
 import { Braces, Check, ChevronDown, Component, Copy, Plus, Target, Unlink, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { detachInstance, parseStyleInput, patchNodes, setStyle } from "../lib/edits";
-import { nodeTitle } from "../lib/model";
+import { nodeTitle, type Model } from "../lib/model";
 import { useEditor } from "../lib/store";
 import { fitTo } from "../lib/viewport";
 import { AutocompleteInput, type Suggestion } from "./AutocompleteInput";
@@ -10,22 +10,37 @@ import { IconField } from "./IconField";
 import { Popover } from "./Popover";
 import { cn } from "../lib/cn";
 
+interface LayoutContext {
+  /** Each selected layer's own `display`. */
+  displays: string[];
+  /** Each selected layer's parent's `display` ("" at the top level). */
+  parentDisplays: string[];
+}
+
 interface FieldDef {
   property: string;
   kind?: TokenKind;
   options?: string[];
+  /** Shown only when this holds for some selected layer, or when the property already has a value. */
+  appliesWhen?: (context: LayoutContext) => boolean;
 }
+
+const isFlex = (display: string) => display === "flex" || display === "inline-flex";
+const isFlexOrGrid = (display: string) => isFlex(display) || display === "grid" || display === "inline-grid";
+const ownFlex = ({ displays }: LayoutContext) => displays.some(isFlex);
+const ownFlexOrGrid = ({ displays }: LayoutContext) => displays.some(isFlexOrGrid);
+const parentFlex = ({ parentDisplays }: LayoutContext) => parentDisplays.some(isFlex);
 
 const GROUPS: { title: string; fields: FieldDef[]; when?: (types: Set<DesignNode["type"]>) => boolean }[] = [
   {
     title: "Layout",
     fields: [
       { property: "display", options: ["block", "flex", "inline-flex", "grid", "none"] },
-      { property: "flex-direction", options: ["row", "column", "row-reverse", "column-reverse"] },
-      { property: "justify-content", options: ["start", "center", "end", "space-between", "space-around"] },
-      { property: "align-items", options: ["stretch", "start", "center", "end", "baseline"] },
-      { property: "gap", kind: "spacing" },
-      { property: "flex", options: ["1", "none", "auto"] },
+      { property: "flex-direction", options: ["row", "column", "row-reverse", "column-reverse"], appliesWhen: ownFlex },
+      { property: "justify-content", options: ["start", "center", "end", "space-between", "space-around"], appliesWhen: ownFlexOrGrid },
+      { property: "align-items", options: ["stretch", "start", "center", "end", "baseline"], appliesWhen: ownFlexOrGrid },
+      { property: "gap", kind: "spacing", appliesWhen: ownFlexOrGrid },
+      { property: "flex", options: ["1", "none", "auto"], appliesWhen: parentFlex },
       { property: "position", options: ["static", "relative", "absolute"] },
     ],
   },
@@ -141,6 +156,14 @@ function declarationSuggestions(draft: string, tokens: Record<string, Token> | u
 
 const MIXED = Symbol("mixed");
 
+/** An instance without its own `display` takes its component's. */
+function effectiveDisplay(model: Model, node: DesignNode): string {
+  const own = node.style?.display;
+  if (own !== undefined) return String(own);
+  if (node.type === "instance") return String(model.nodes[node.componentId]?.style?.display ?? "");
+  return "";
+}
+
 function valueOf(nodes: DesignNode[], property: string): string | typeof MIXED {
   const values = new Set(nodes.map((n) => (n.style?.[property] === undefined ? "" : String(n.style[property]))));
   return values.size > 1 ? MIXED : ([...values][0] ?? "");
@@ -182,6 +205,10 @@ export function PropertiesPanel() {
 function SelectionProperties({ ids, nodes }: { ids: string[]; nodes: DesignNode[] }) {
   const { model, commit, snapshot } = useEditor();
   const types = new Set(nodes.map((n) => n.type));
+  const layout: LayoutContext = {
+    displays: nodes.map((n) => effectiveDisplay(model, n)),
+    parentDisplays: nodes.map((n) => (n.parentId && model.nodes[n.parentId] ? effectiveDisplay(model, model.nodes[n.parentId]!) : "")),
+  };
   const single = nodes.length === 1 ? nodes[0]! : undefined;
   const singleId = single ? ids[0]! : undefined;
   const addProp = useRef<HTMLDivElement>(null);
@@ -273,6 +300,7 @@ function SelectionProperties({ ids, nodes }: { ids: string[]; nodes: DesignNode[
           <Section key={group.title} title={group.title} collapsible>
             {group.fields.map((field) => {
               const value = valueOf(nodes, field.property);
+              if (field.appliesWhen && value === "" && !field.appliesWhen(layout)) return null;
               return (
                 <Field
                   key={field.property}
