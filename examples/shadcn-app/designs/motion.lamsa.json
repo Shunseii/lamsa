@@ -1,0 +1,816 @@
+{
+  "$schema": "https://lamsa.dev/schema/v1.json",
+  "css": "@keyframes fade-up {\n  from {\n    opacity: 0;\n    translate: 0 8px;\n  }\n}\n\n@keyframes scale-in {\n  from {\n    opacity: 0;\n    scale: 0.95;\n  }\n}\n\n@keyframes slide-in {\n  from {\n    opacity: 0;\n    translate: 48px 0;\n  }\n}\n\n@keyframes pop {\n  50% {\n    scale: 1.15;\n  }\n}\n\n@keyframes page-in {\n  from {\n    opacity: 0;\n    translate: 24px 0;\n  }\n}\n\n@keyframes page-back-in {\n  from {\n    opacity: 0;\n    translate: -24px 0;\n  }\n}\n\n::view-transition-group(order) {\n  animation-duration: 320ms;\n  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);\n}\n\n::view-transition-group(root) {\n  animation-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);\n}\n\n@keyframes lamsa-slide-from-right {\n  from {\n    opacity: 0;\n    translate: 32px 0;\n  }\n}\n\n@keyframes lamsa-slide-from-left {\n  from {\n    opacity: 0;\n    translate: -32px 0;\n  }\n}\n\n::view-transition-old(root) {\n  animation-name: none;\n}\n\n::view-transition-new(root) {\n  animation-name: none;\n}",
+  "nodes": {
+    "2RQOHWnk": {
+      "index": "a0",
+      "name": "spring",
+      "parentId": "gEzNORqy",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
+      },
+      "type": "frame"
+    },
+    "3E90ipmu": {
+      "css": "view-transition-name: order;",
+      "index": "a1",
+      "name": "Order card",
+      "parentId": "H3KuvVOs",
+      "style": {
+        "background": "{color.muted}",
+        "border-radius": "{radius.lg}",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 6,
+        "height": 200,
+        "padding": 16
+      },
+      "type": "frame"
+    },
+    "4tREsw2h": {
+      "css": "display: none;\n\n[data-state=\"done\"] & {\n  display: block;\n  animation: pop 300ms 150ms cubic-bezier(0.23, 1, 0.32, 1) both;\n}",
+      "icon": "check",
+      "index": "a1",
+      "name": "Check",
+      "parentId": "I1FP6OnE",
+      "set": "lucide",
+      "style": {
+        "height": 18,
+        "width": 18
+      },
+      "type": "icon"
+    },
+    "7vGR89TT": {
+      "index": "a1",
+      "name": "Motion · Toast entrance",
+      "style": {
+        "align-items": "flex-start",
+        "background": "{color.muted}",
+        "display": "flex",
+        "font-family": "{font.sans}",
+        "gap": 24,
+        "padding": 32,
+        "width": 860
+      },
+      "type": "frame",
+      "x": 0,
+      "y": 220
+    },
+    "8Oi0pd98": {
+      "css": "animation: slide-in 320ms 40ms cubic-bezier(0.23, 1, 0.32, 1) both;",
+      "index": "a1",
+      "name": "Slide in",
+      "parentId": "mAsHGQxo",
+      "style": {
+        "background": "{color.card}",
+        "border": "1px solid {color.border}",
+        "border-radius": "{radius.lg}",
+        "box-shadow": "{shadow.md}",
+        "display": "flex",
+        "flex-direction": "column",
+        "font-size": 14,
+        "gap": 2,
+        "padding": "12px 14px",
+        "width": 240
+      },
+      "type": "frame"
+    },
+    "9D6h26rn": {
+      "index": "a4",
+      "name": "dim",
+      "parentId": "gEzNORqy",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
+      },
+      "type": "frame"
+    },
+    "A45sOmeB": {
+      "componentId": "Btn00001",
+      "css": "transition: scale 120ms var(--ease-out);\n\n&:active {\n  scale: 0.97;\n}",
+      "index": "a1",
+      "name": "Press",
+      "parentId": "rkcKkvxg",
+      "props": {
+        "icon": true,
+        "label": "Pay $48.00"
+      },
+      "type": "instance"
+    },
+    "BlvZmOU5": {
+      "content": "Saved",
+      "index": "a0",
+      "parentId": "PSvR8Nh5",
+      "style": {
+        "font-weight": 600
+      },
+      "type": "text"
+    },
+    "Cb549wGg": {
+      "componentId": "Btn00001",
+      "css": "transition: box-shadow 300ms var(--ease-out);\n\n&:active {\n  box-shadow: 0 0 0 4px {color.ring};\n  transition-duration: 60ms;\n}",
+      "index": "a1",
+      "name": "Ring",
+      "parentId": "et3Fx7wK",
+      "props": {
+        "icon": true,
+        "label": "Pay $48.00"
+      },
+      "type": "instance"
+    },
+    "CzXaBk6T": {
+      "index": "a0",
+      "name": "Motion · Button hover",
+      "style": {
+        "align-items": "flex-start",
+        "background": "{color.muted}",
+        "display": "flex",
+        "font-family": "{font.sans}",
+        "gap": 24,
+        "padding": 32,
+        "width": 860
+      },
+      "type": "frame",
+      "x": 0,
+      "y": -12
+    },
+    "DaWrNgql": {
+      "css": "animation: fade-up 240ms var(--ease-out) both;",
+      "index": "a1",
+      "name": "Fade up",
+      "parentId": "WzVLEbGD",
+      "style": {
+        "background": "{color.card}",
+        "border": "1px solid {color.border}",
+        "border-radius": "{radius.lg}",
+        "box-shadow": "{shadow.md}",
+        "display": "flex",
+        "flex-direction": "column",
+        "font-size": 14,
+        "gap": 2,
+        "padding": "12px 14px",
+        "width": 240
+      },
+      "type": "frame"
+    },
+    "EzhziaMr": {
+      "componentId": "Btn00001",
+      "css": "transition: scale 400ms cubic-bezier(0.34, 1.56, 0.64, 1);\n\n&:active {\n  scale: 0.92;\n  transition-duration: 100ms;\n  transition-timing-function: var(--ease-out);\n}",
+      "index": "a1",
+      "name": "Spring",
+      "parentId": "2RQOHWnk",
+      "props": {
+        "icon": true,
+        "label": "Pay $48.00"
+      },
+      "type": "instance"
+    },
+    "FiDKHk2v": {
+      "content": "Saved",
+      "index": "a0",
+      "parentId": "8Oi0pd98",
+      "style": {
+        "font-weight": 600
+      },
+      "type": "text"
+    },
+    "Gj8wTSaJ": {
+      "index": "a1",
+      "name": "scale-in · 200ms",
+      "parentId": "7vGR89TT",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
+      },
+      "type": "frame"
+    },
+    "GnoNbSqf": {
+      "content": "spring · 400ms",
+      "index": "a0",
+      "parentId": "2RQOHWnk",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-family": "var(--font-geist-mono)",
+        "font-size": 12
+      },
+      "type": "text"
+    },
+    "H3KuvVOs": {
+      "index": "a5",
+      "name": "Motion · Page · Detail",
+      "style": {
+        "background": "{color.background}",
+        "display": "flex",
+        "flex-direction": "column",
+        "font-family": "{font.sans}",
+        "gap": 16,
+        "height": 520,
+        "padding": 24,
+        "width": 390
+      },
+      "type": "frame",
+      "x": 470,
+      "y": 1160
+    },
+    "Hz53RpaS": {
+      "content": "Your changes are live.",
+      "index": "a1",
+      "parentId": "PSvR8Nh5",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-size": 13
+      },
+      "type": "text"
+    },
+    "I1FP6OnE": {
+      "css": "transition:\n  width 300ms cubic-bezier(0.23, 1, 0.32, 1),\n  border-radius 300ms cubic-bezier(0.23, 1, 0.32, 1),\n  background-color 200ms;\n\n&:active {\n  scale: 0.98;\n}\n\n&[data-state=\"loading\"] {\n  width: 44px;\n  border-radius: 999px;\n}\n\n&[data-state=\"done\"] {\n  width: 44px;\n  border-radius: 999px;\n  background-color: oklch(0.627 0.194 149.214);\n}",
+      "index": "a1",
+      "name": "Pay button",
+      "parentId": "pYEZreMd",
+      "style": {
+        "align-items": "center",
+        "background": "{color.primary}",
+        "border-radius": "{radius.md}",
+        "color": "{color.primary-foreground}",
+        "display": "flex",
+        "font-size": 15,
+        "font-weight": 500,
+        "gap": 8,
+        "height": 44,
+        "justify-content": "center",
+        "overflow": "hidden",
+        "width": 240
+      },
+      "type": "frame"
+    },
+    "ID7J8xP4": {
+      "content": "rest → loading → done",
+      "index": "a0",
+      "parentId": "pYEZreMd",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-family": "var(--font-geist-mono)",
+        "font-size": 12
+      },
+      "type": "text"
+    },
+    "IykrkNaM": {
+      "content": "Orders",
+      "index": "a0",
+      "name": "Heading",
+      "parentId": "MN9ycNDB",
+      "style": {
+        "color": "{color.foreground}",
+        "font-size": 22,
+        "font-weight": 600
+      },
+      "type": "text"
+    },
+    "IztxSl7b": {
+      "css": "transition:\n  opacity 200ms var(--ease-out),\n  scale 200ms var(--ease-out),\n  display 200ms allow-discrete;\n\n@starting-style {\n  opacity: 0;\n  scale: 0.95;\n}\n\n&[data-state=\"closed\"] {\n  display: none;\n  opacity: 0;\n  scale: 0.95;\n  transition-duration: 150ms;\n}",
+      "index": "a1",
+      "name": "Dialog",
+      "parentId": "U9J1eg9I",
+      "style": {
+        "background": "{color.background}",
+        "border-radius": "{radius.lg}",
+        "box-shadow": "{shadow.lg}",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 8,
+        "padding": 24,
+        "position": "relative",
+        "width": 320
+      },
+      "type": "frame"
+    },
+    "KsvO4H0O": {
+      "content": "Your changes are live.",
+      "index": "a1",
+      "parentId": "DaWrNgql",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-size": 13
+      },
+      "type": "text"
+    },
+    "L8xfYEwa": {
+      "componentId": "Btn00001",
+      "css": "transition:\n  opacity 100ms var(--ease-out),\n  scale 100ms var(--ease-out);\n\n&:active {\n  opacity: 0.8;\n  scale: 0.98;\n}",
+      "index": "a1",
+      "name": "Dim",
+      "parentId": "9D6h26rn",
+      "props": {
+        "icon": true,
+        "label": "Pay $48.00"
+      },
+      "type": "instance"
+    },
+    "MN9ycNDB": {
+      "index": "a4",
+      "name": "Motion · Page · List",
+      "style": {
+        "background": "{color.background}",
+        "display": "flex",
+        "flex-direction": "column",
+        "font-family": "{font.sans}",
+        "gap": 16,
+        "height": 520,
+        "padding": 24,
+        "width": 390
+      },
+      "type": "frame",
+      "x": 0,
+      "y": 1160
+    },
+    "PSvR8Nh5": {
+      "css": "animation: scale-in 200ms cubic-bezier(0.27, 0.68, 0.58, 0.92) both;\ntransform-origin: top center;",
+      "index": "a1",
+      "name": "Scale in",
+      "parentId": "Gj8wTSaJ",
+      "style": {
+        "background": "{color.card}",
+        "border": "1px solid {color.border}",
+        "border-radius": "{radius.lg}",
+        "box-shadow": "{shadow.md}",
+        "display": "flex",
+        "flex-direction": "column",
+        "font-size": 14,
+        "gap": 2,
+        "padding": "12px 14px",
+        "width": 240
+      },
+      "type": "frame"
+    },
+    "QBADgkys": {
+      "content": "push · 80ms",
+      "index": "a0",
+      "parentId": "hcD3UU1J",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-family": "var(--font-geist-mono)",
+        "font-size": 12
+      },
+      "type": "text"
+    },
+    "S8wX5isl": {
+      "index": "a2",
+      "name": "Motion · Pay morph",
+      "style": {
+        "align-items": "flex-start",
+        "background": "{color.muted}",
+        "display": "flex",
+        "font-family": "{font.sans}",
+        "gap": 24,
+        "height": 160,
+        "padding": 32,
+        "width": 860
+      },
+      "type": "frame",
+      "x": 0,
+      "y": 440
+    },
+    "SF2XprMl": {
+      "content": "Pay $48.00",
+      "css": "[data-state=\"loading\"] &, [data-state=\"done\"] & {\n  display: none;\n}",
+      "index": "a2",
+      "name": "Label",
+      "parentId": "I1FP6OnE",
+      "style": {
+        "white-space": "nowrap"
+      },
+      "type": "text"
+    },
+    "TuFGJfw4": {
+      "index": "a0",
+      "name": "lift",
+      "parentId": "CzXaBk6T",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
+      },
+      "type": "frame"
+    },
+    "U9J1eg9I": {
+      "index": "a3",
+      "name": "Motion · Dialog",
+      "style": {
+        "align-items": "center",
+        "background": "{color.muted}",
+        "display": "flex",
+        "font-family": "{font.sans}",
+        "height": 360,
+        "justify-content": "center",
+        "position": "relative",
+        "width": 860
+      },
+      "type": "frame",
+      "x": 0,
+      "y": 720
+    },
+    "WzVLEbGD": {
+      "index": "a0",
+      "name": "fade-up · 240ms",
+      "parentId": "7vGR89TT",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
+      },
+      "type": "frame"
+    },
+    "XGFpvPyX": {
+      "content": "Order #1042",
+      "index": "a0",
+      "name": "Heading",
+      "parentId": "H3KuvVOs",
+      "style": {
+        "color": "{color.foreground}",
+        "font-size": 22,
+        "font-weight": 600
+      },
+      "type": "text"
+    },
+    "XaUbWdjk": {
+      "content": "Your changes are live.",
+      "index": "a1",
+      "parentId": "8Oi0pd98",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-size": 13
+      },
+      "type": "text"
+    },
+    "Y8hslCkX": {
+      "css": "view-transition-name: order;",
+      "index": "a1",
+      "name": "Order card",
+      "parentId": "MN9ycNDB",
+      "style": {
+        "background": "{color.muted}",
+        "border-radius": "{radius.lg}",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 6,
+        "height": 72,
+        "padding": 16
+      },
+      "type": "frame"
+    },
+    "Y91qyv9p": {
+      "content": "scale-in · 200ms",
+      "index": "a0",
+      "parentId": "Gj8wTSaJ",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-family": "var(--font-geist-mono)",
+        "font-size": 12
+      },
+      "type": "text"
+    },
+    "YXpM323b": {
+      "content": "Order #1042 · Shipped",
+      "index": "a0",
+      "name": "Label",
+      "parentId": "Y8hslCkX",
+      "style": {
+        "color": "{color.foreground}",
+        "font-size": 15,
+        "font-weight": 500
+      },
+      "type": "text"
+    },
+    "aJROUJ1y": {
+      "content": "Order #1042 · Shipped",
+      "index": "a0",
+      "name": "Label",
+      "parentId": "3E90ipmu",
+      "style": {
+        "color": "{color.foreground}",
+        "font-size": 15,
+        "font-weight": 500
+      },
+      "type": "text"
+    },
+    "aNijAZ9k": {
+      "content": "Saved",
+      "index": "a0",
+      "parentId": "DaWrNgql",
+      "style": {
+        "font-weight": 600
+      },
+      "type": "text"
+    },
+    "am3UIc7a": {
+      "index": "a2",
+      "name": "squish",
+      "parentId": "gEzNORqy",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
+      },
+      "type": "frame"
+    },
+    "bEbLG4M3": {
+      "componentId": "Btn00001",
+      "css": "transition: scale 300ms cubic-bezier(0.34, 1.56, 0.64, 1);\n\n&:active {\n  scale: 1.04 0.92;\n  transition-duration: 90ms;\n}",
+      "index": "a1",
+      "name": "Squish",
+      "parentId": "am3UIc7a",
+      "props": {
+        "icon": true,
+        "label": "Pay $48.00"
+      },
+      "type": "instance"
+    },
+    "crR4V5Yy": {
+      "content": "lift",
+      "index": "a0",
+      "parentId": "TuFGJfw4",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-family": "var(--font-geist-mono)",
+        "font-size": 12
+      },
+      "type": "text"
+    },
+    "dOECIJyQ": {
+      "content": "dim · 100ms",
+      "index": "a0",
+      "parentId": "9D6h26rn",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-family": "var(--font-geist-mono)",
+        "font-size": 12
+      },
+      "type": "text"
+    },
+    "et3Fx7wK": {
+      "index": "a3",
+      "name": "ring",
+      "parentId": "gEzNORqy",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
+      },
+      "type": "frame"
+    },
+    "fy7cbQIR": {
+      "content": "Delete project?",
+      "index": "a0",
+      "name": "Title",
+      "parentId": "IztxSl7b",
+      "style": {
+        "color": "{color.foreground}",
+        "font-size": 18,
+        "font-weight": 600
+      },
+      "type": "text"
+    },
+    "gEzNORqy": {
+      "index": "a6",
+      "name": "Motion · Button click",
+      "style": {
+        "align-items": "flex-start",
+        "background": "{color.muted}",
+        "display": "flex",
+        "flex-wrap": "wrap",
+        "font-family": "{font.sans}",
+        "gap": 24,
+        "padding": 32,
+        "width": 860
+      },
+      "type": "frame",
+      "x": 940,
+      "y": 0
+    },
+    "hTtGBI2O": {
+      "content": "Play shows it pop in; the closed state shows it leave.",
+      "index": "a1",
+      "name": "Body",
+      "parentId": "IztxSl7b",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-size": 14
+      },
+      "type": "text"
+    },
+    "hcD3UU1J": {
+      "index": "a1",
+      "name": "push",
+      "parentId": "gEzNORqy",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
+      },
+      "type": "frame"
+    },
+    "iCIhvGMO": {
+      "content": "slide-in · 320ms +40ms",
+      "index": "a0",
+      "parentId": "mAsHGQxo",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-family": "var(--font-geist-mono)",
+        "font-size": 12
+      },
+      "type": "text"
+    },
+    "m3dSr6t8": {
+      "content": "fade-up · 240ms",
+      "index": "a0",
+      "parentId": "WzVLEbGD",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-family": "var(--font-geist-mono)",
+        "font-size": 12
+      },
+      "type": "text"
+    },
+    "mAsHGQxo": {
+      "index": "a2",
+      "name": "slide-in · 320ms +40ms",
+      "parentId": "7vGR89TT",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
+      },
+      "type": "frame"
+    },
+    "mR9xX4oU": {
+      "index": "a2",
+      "name": "soft",
+      "parentId": "CzXaBk6T",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
+      },
+      "type": "frame"
+    },
+    "mifwYRCA": {
+      "componentId": "Btn00001",
+      "css": "box-shadow: 0 4px 0 {color.foreground};\ntransition:\n  translate 80ms var(--ease-out),\n  box-shadow 80ms var(--ease-out);\n\n&:active {\n  translate: 0 4px;\n  box-shadow: 0 0 0 {color.foreground};\n}",
+      "index": "a1",
+      "name": "Push",
+      "parentId": "hcD3UU1J",
+      "props": {
+        "icon": true,
+        "label": "Pay $48.00"
+      },
+      "type": "instance"
+    },
+    "p5StVmwL": {
+      "content": "soft",
+      "index": "a0",
+      "parentId": "mR9xX4oU",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-family": "var(--font-geist-mono)",
+        "font-size": 12
+      },
+      "type": "text"
+    },
+    "pFLHs1Tm": {
+      "content": "press",
+      "index": "a0",
+      "parentId": "rkcKkvxg",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-family": "var(--font-geist-mono)",
+        "font-size": 12
+      },
+      "type": "text"
+    },
+    "pYEZreMd": {
+      "index": "a0",
+      "name": "rest → loading → done",
+      "parentId": "S8wX5isl",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
+      },
+      "type": "frame"
+    },
+    "qbidS3I2": {
+      "componentId": "Btn00001",
+      "css": "transition:\n  translate 240ms cubic-bezier(0.23, 1, 0.32, 1),\n  box-shadow 240ms cubic-bezier(0.23, 1, 0.32, 1);\n\n&:hover {\n  translate: 0 -3px;\n  box-shadow: {shadow.lg};\n}\n\n&:active {\n  scale: 0.98;\n}",
+      "index": "a1",
+      "name": "Soft",
+      "parentId": "mR9xX4oU",
+      "props": {
+        "icon": true,
+        "label": "Pay $48.00"
+      },
+      "type": "instance"
+    },
+    "qrIslnP2": {
+      "css": "display: none;\nanimation: spin 800ms linear infinite;\n\n[data-state=\"loading\"] & {\n  display: block;\n}",
+      "icon": "loader-circle",
+      "index": "a0",
+      "name": "Spinner",
+      "parentId": "I1FP6OnE",
+      "set": "lucide",
+      "style": {
+        "height": 18,
+        "width": 18
+      },
+      "type": "icon"
+    },
+    "rkcKkvxg": {
+      "index": "a1",
+      "name": "press",
+      "parentId": "CzXaBk6T",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
+      },
+      "type": "frame"
+    },
+    "rw8RfRAu": {
+      "content": "squish · 300ms",
+      "index": "a0",
+      "parentId": "am3UIc7a",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-family": "var(--font-geist-mono)",
+        "font-size": 12
+      },
+      "type": "text"
+    },
+    "uNA1WrHd": {
+      "css": "transition:\n  opacity 200ms var(--ease-out),\n  display 200ms allow-discrete;\n\n@starting-style {\n  opacity: 0;\n}\n\n&[data-state=\"closed\"] {\n  display: none;\n  opacity: 0;\n  transition-duration: 150ms;\n}",
+      "index": "a0",
+      "name": "Backdrop",
+      "parentId": "U9J1eg9I",
+      "style": {
+        "background": "{color.foreground}",
+        "bottom": 0,
+        "left": 0,
+        "opacity": 0.4,
+        "position": "absolute",
+        "right": 0,
+        "top": 0
+      },
+      "type": "frame"
+    },
+    "vOP4ZmbB": {
+      "content": "Arrives Thursday. The card morphs between pages because both frames give it view-transition-name: order.",
+      "index": "a2",
+      "name": "Details",
+      "parentId": "H3KuvVOs",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-size": 14
+      },
+      "type": "text"
+    },
+    "wJC8lNma": {
+      "componentId": "Btn00001",
+      "css": "transition:\n  translate 150ms var(--ease-out),\n  box-shadow 150ms var(--ease-out);\n\n&:hover {\n  translate: 0 -2px;\n  box-shadow: {shadow.md};\n}\n\n&:active {\n  translate: 0 0;\n  box-shadow: none;\n}",
+      "index": "a1",
+      "name": "Lift",
+      "parentId": "TuFGJfw4",
+      "props": {
+        "icon": true,
+        "label": "Pay $48.00"
+      },
+      "type": "instance"
+    },
+    "zu4rVWjQ": {
+      "content": "ring · 300ms",
+      "index": "a0",
+      "parentId": "et3Fx7wK",
+      "style": {
+        "color": "{color.muted-foreground}",
+        "font-family": "var(--font-geist-mono)",
+        "font-size": 12
+      },
+      "type": "text"
+    }
+  },
+  "version": 1
+}

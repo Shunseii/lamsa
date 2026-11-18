@@ -9,7 +9,7 @@ lamsa (لمسة, "a touch") is an open-source, local-first design tool for devel
 - **Agent-complete.** Init, design, validate, render and review all run headless.
 
 ```sh
-npx lamsa init --agent claude --yes   # config, agent skill, AGENTS.md section
+lamsa init --agent claude --yes       # config, agent skill, AGENTS.md section
 lamsa tokens                          # what your app's CSS defines
 lamsa add --file designs/home.lamsa.json --tree '{"type":"frame","name":"Home","style":{"width":390,"height":844}}'
 lamsa validate                        # errors name the node ID and a fix
@@ -25,6 +25,8 @@ pnpm install
 pnpm build
 pnpm test
 ```
+
+To install the `lamsa` CLI and the desktop editor for your user (on Linux: `~/.local/bin`, plus an app-menu entry and icon), run `pnpm --filter @lamsa/desktop install:app`. lamsa isn't published to npm yet, so `npx lamsa` won't work.
 
 MIT licensed.
 

@@ -145,12 +145,14 @@ export async function selectionCommand({ out }: { out: Output }): Promise<number
     const baseId = id.split("/")[0]!;
     return { id, file: locations.get(baseId)?.file, node: nodes[baseId] ?? null };
   });
-  out.result({ ok: true, editorOpen: !!session, updatedAt: session?.updatedAt, selection }, () => {
+  out.result({ ok: true, editorOpen: !!session, updatedAt: session?.updatedAt, selection, open: session?.open ?? null }, () => {
     if (!session) return "no editor session (the desktop app has not run in this repo)";
-    if (selection.length === 0) return "nothing selected";
-    return selection
-      .map((s) => `${s.id}${s.node?.name ? ` ${JSON.stringify(s.node.name)}` : ""} (${s.node?.type ?? "missing"}) in ${s.file ?? "?"}`)
-      .join("\n");
+    const files = session.open ? `open files: ${session.open.join(", ") || "none"}` : "open files: not chosen yet";
+    if (selection.length === 0) return `nothing selected\n${files}`;
+    return [
+      ...selection.map((s) => `${s.id}${s.node?.name ? ` ${JSON.stringify(s.node.name)}` : ""} (${s.node?.type ?? "missing"}) in ${s.file ?? "?"}`),
+      files,
+    ].join("\n");
   });
   return ExitCode.ok;
 }

@@ -107,6 +107,15 @@ export function allNodes(project: Project): Record<string, DesignNode> {
   return nodes;
 }
 
+/** File-level CSS (`@keyframes` and friends) from every design file, in path order. */
+export function allFileCss(project: Project): string {
+  return [...project.files.values()]
+    .sort((a, b) => (a.path < b.path ? -1 : 1))
+    .map((file) => (isDesignFile(file.raw) && typeof file.raw.css === "string" ? file.raw.css : ""))
+    .filter((css) => css.trim())
+    .join("\n");
+}
+
 export async function saveDesignFile(root: string, path: string, file: DesignFile): Promise<void> {
   await writeFileAtomic(join(root, path), stableStringify(file));
 }

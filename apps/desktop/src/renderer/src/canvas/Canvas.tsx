@@ -1,10 +1,13 @@
 import type { DesignNode } from "@lamsa/schema";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Play } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { insertNodes, newId, reparentMany, setStyle } from "../lib/edits";
 import { ancestorsOf, baseId, childrenOf, fileRegions, isComponent, isLocked, nodeTitle, rootOf, type Model } from "../lib/model";
 import { shortcut } from "../lib/keys";
-import { useEditor } from "../lib/store";
-import { findElement, FrameView } from "./FrameView";
+import { firstOpenFile, useEditor } from "../lib/store";
+import { AddFileMenu } from "../panels/AddFileMenu";
+import { findElement, FrameView, shadowRoots } from "./FrameView";
 import { cn } from "../lib/cn";
 
 interface Rect {
@@ -26,6 +29,14 @@ type Drag =
   | { kind: "reorder"; start: { x: number; y: number }; ids: string[]; fromParent: string; parentId: string; beforeId: string | null; line: Rect | null }
   | { kind: "resize"; start: { x: number; y: number }; id: string; handle: Handle; origin: Rect; isRoot: boolean; absolute: boolean; originPos: { left: number; top: number }; size: { w: number; h: number }; moved: boolean }
   | { kind: "draw"; start: { x: number; y: number }; current: { x: number; y: number }; parentId?: string; tool: "frame" | "rect" };
+
+/** Frames narrower than this on screen don't get the label's preview button; it would crowd the name. */
+const PLAY_MIN_WIDTH = 140;
+
+function showsPlay(node: DesignNode, zoom: number): boolean {
+  const width = parseFloat(String(node.style?.width ?? ""));
+  return Number.isFinite(width) ? width * zoom >= PLAY_MIN_WIDTH : zoom >= 0.5;
+}
 
 interface Guide {
   axis: "x" | "y";
@@ -61,7 +72,8 @@ function isFlowParent(element: HTMLElement | null): { flow: boolean; axis: "x" |
   return { flow: flex || grid || style.display === "block", axis };
 }
 
-export function Canvas() {
+/** Memoised: the editor shell re-renders on panel toggles, which don't change the canvas. */
+export const Canvas = memo(function Canvas() {
   const container = useRef<HTMLDivElement>(null);
   const [, setTick] = useState(0);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -82,11 +94,26 @@ export function Canvas() {
     editingText,
     flash,
     previewProps,
-  } = useEditor();
+  } = useEditor(
+    useShallow((s) => ({
+      snapshot: s.snapshot,
+      model: s.model,
+      selection: s.selection,
+      hover: s.hover,
+      tool: s.tool,
+      viewport: s.viewport,
+      canvasMode: s.canvasMode,
+      icons: s.icons,
+      renderVersion: s.renderVersion,
+      editingText: s.editingText,
+      flash: s.flash,
+      previewProps: s.previewProps,
+    })),
+  );
   const store = useEditor.getState;
 
   const tokens = snapshot?.tokens;
-  const regions = fileRegions(model, snapshot?.root);
+  const regions = fileRegions(model, snapshot?.root, (id) => (shadowRoots.get(id)?.host as HTMLElement | undefined)?.offsetWidth);
   const dxOf = (id: string) => regions.get(model.fileOf.get(id) ?? "")?.dx ?? 0;
   const dxOfFile = (file: string) => regions.get(file)?.dx ?? 0;
 
@@ -309,6 +336,21 @@ export function Canvas() {
         size: { w: Math.round(rect.w / viewport.zoom), h: Math.round(rect.h / viewport.zoom) },
         moved: false,
       });
+      return;
+    }
+
+    // A file's name selects all its frames; dragging it moves them together.
+    const fileLabel = tool === "select" ? target.closest<HTMLElement>(".file-label") : null;
+    if (fileLabel?.dataset.file) {
+      const frames = model.roots.filter((id) => model.fileOf.get(id) === fileLabel.dataset.file);
+      if (!frames.length) return;
+      if (e.shiftKey) {
+        const all = frames.every((id) => selection.includes(id));
+        store().select(all ? selection.filter((id) => !frames.includes(id)) : [...new Set([...selection, ...frames])]);
+        return;
+      }
+      store().select(frames);
+      setDrag({ kind: "pending-move", start: point, id: frames[0]!, collapse: false });
       return;
     }
 
@@ -803,7 +845,15 @@ export function Canvas() {
       <div className="canvas-grid" style={{ backgroundPosition: `${viewport.x}px ${viewport.y}px`, backgroundSize: `${24 * viewport.zoom}px ${24 * viewport.zoom}px` }} />
       <div className="world" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})` }}>
         {[...regions.values()].map((region) => (
-          <div key={region.file} className="file-label" style={{ left: region.left, top: region.top - 40 / viewport.zoom - 24, transform: `scale(${1 / viewport.zoom})` }}>
+          <div
+            key={region.file}
+            className={cn("file-label", {
+              "is-selected": selection.length > 0 && model.roots.filter((id) => model.fileOf.get(id) === region.file).every((id) => selection.includes(id)),
+            })}
+            data-file={region.file}
+            title={`${region.file} · click to select its frames, drag to move them`}
+            style={{ left: region.left, top: region.top - 40 / viewport.zoom - 24, transform: `scale(${1 / viewport.zoom})` }}
+          >
             {region.file.split("/").pop()}
           </div>
         ))}
@@ -820,15 +870,29 @@ export function Canvas() {
                 >
                   {node.type === "frame" && node.component ? "◇ " : ""}
                   {nodeTitle(id, node)}
+                  {showsPlay(node, viewport.zoom) && (
+                    <button
+                      className="frame-label-play"
+                      aria-label={`Preview ${nodeTitle(id, node)}`}
+                      title="Preview animations  P"
+                      data-testid="frame-label-play"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => useEditor.getState().openPreview([id])}
+                    >
+                      <Play size={10} />
+                    </button>
+                  )}
                 </div>
               )}
               <FrameView
                 id={id}
                 nodes={model.nodes}
+                children={model.children}
                 tokens={tokens}
                 icons={icons}
                 canvasMode={canvasMode}
                 componentProps={previewProps[id]}
+                fileCss={model.fileCss}
                 version={renderVersion}
                 frozen={!!editingText && rootOf(model, baseId(editingText)) === id}
               />
@@ -840,7 +904,7 @@ export function Canvas() {
       {model.roots.length === 0 && <EmptyCanvas />}
     </div>
   );
-}
+});
 
 /** One wheel notch zooms ~1.2×; trackpad pinches (many small deltas) zoom smoothly. */
 const NOTCH_STEP = Math.log(1.2);
@@ -851,20 +915,34 @@ function zoomFactor(e: WheelEvent): number {
 }
 
 function defaultFile(model: Model): string {
-  const files = [...new Set(model.fileOf.values())];
   const state = useEditor.getState();
   const selected = state.selection[0];
   if (selected && model.fileOf.get(selected)) return model.fileOf.get(selected)!;
-  const fromSnapshot = Object.keys(state.files)[0];
-  return files[0] ?? fromSnapshot ?? `${state.snapshot?.config.designs[0]?.split("/")[0] ?? "designs"}/main.lamsa.json`;
+  return firstOpenFile(state) ?? `${state.snapshot?.config.designs[0]?.split("/")[0] ?? "designs"}/main.lamsa.json`;
 }
 
 function EmptyCanvas() {
   const setTool = useEditor((s) => s.setTool);
   const togglePanel = useEditor((s) => s.togglePanel);
+  const noneOpen = useEditor((s) => s.openFiles !== null && s.openFiles.length === 0 && Object.keys(s.files).length > 0);
+  if (useEditor.getState().openFiles === null) return null;
+  if (noneOpen) {
+    return (
+      <div className="empty-canvas">
+        <div className="empty-card" data-testid="no-files-open" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="empty-icon">⌗</div>
+          <div className="title">No files open</div>
+          <p>Open one of this project's design files, or pick one from anywhere on disk.</p>
+          <div className="empty-actions">
+            <AddFileMenu appearance="primary" />
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="empty-canvas">
-      <div className="empty-card">
+      <div className="empty-card" onPointerDown={(e) => e.stopPropagation()}>
         <div className="empty-icon">⌗</div>
         <div className="title">This file is empty</div>
         <p>Draw a frame to start, or ask your agent to design something.</p>

@@ -36,6 +36,7 @@ function itemsFor(model: Model, selection: string[]): Item[][] {
       { label: "Paste", command: "paste", keys: shortcut("mod+v") },
       { label: "Duplicate", command: "duplicate", keys: shortcut("mod+d") },
     ],
+    [{ label: "Preview animations", command: "preview-animations", keys: "P" }],
     [
       ...(sharedParent ? [{ label: "Group into frame", command: "group" as const, keys: shortcut("mod+g") }] : []),
       ...(nodes.some((n) => n.parentId !== undefined) ? [{ label: "Select parent", command: "select-parent" as const, keys: "Esc" }] : []),
@@ -54,7 +55,7 @@ function itemsFor(model: Model, selection: string[]): Item[][] {
       { label: selection.length > 1 ? "Copy node IDs" : "Copy node ID", command: "copy-id" },
       { label: "Zoom to selection", command: "zoom-selection", keys: shortcut("shift+2") },
     ],
-    [{ label: selection.length > 1 ? `Delete ${selection.length} layers` : "Delete", command: "delete", keys: isMac ? "⌫" : "Delete", danger: true }],
+    [{ label: selection.length > 1 ? `Delete ${selection.length} layers` : "Delete", command: "delete", keys: isMac ? "⌫ Delete" : "Delete", danger: true }],
   ];
   return groups.filter((group) => group.length > 0);
 }

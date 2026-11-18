@@ -10,6 +10,7 @@ import {
   type Style,
   type TokenSet,
 } from "@lamsa/schema";
+import { animationNamesUsed, checkFileCss, checkNodeCss, keyframeNames } from "./css.js";
 import { lucideIconNames } from "./icons.js";
 import type { Project } from "./project.js";
 import { didYouMean } from "./suggest.js";
@@ -42,6 +43,19 @@ interface Context {
   nodes: NodeMap;
   fileOf: Map<string, string>;
   issues: Issue[];
+  /** Keyframe names from design files' CSS and the app stylesheet. */
+  keyframes: Set<string>;
+  /** Normalised light-mode colour value → the token that holds it, preferring project tokens over built-ins. */
+  colorValues: Map<string, string>;
+}
+
+function colorTokensByValue(tokens: TokenSet): Map<string, string> {
+  const colorValues = new Map<string, string>();
+  const byPreference = Object.values(tokens.tokens).sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin));
+  for (const token of byPreference) {
+    if (token.kind === "color") colorValues.set(normaliseColor(token.values.light), token.path);
+  }
+  return colorValues;
 }
 
 export function validateProject({
@@ -54,6 +68,7 @@ export function validateProject({
   const issues: Issue[] = [];
   const nodes: NodeMap = {};
   const fileOf = new Map<string, string>();
+  const keyframes = new Set<string>(tokens.keyframes ?? []);
 
   for (const file of project.files.values()) {
     if (file.parseError) {
@@ -94,6 +109,18 @@ export function validateProject({
       }
       continue;
     }
+    if (parsed.data.css) {
+      for (const problem of checkFileCss(parsed.data.css)) {
+        issues.push({
+          severity: "error",
+          code: "file-css",
+          file: file.path,
+          message: `css${problem.line ? ` line ${problem.line}` : ""}: ${problem.message}`,
+          fix: "file-level css holds @keyframes; each node's own styles go in its \"css\"",
+        });
+      }
+      for (const name of keyframeNames(parsed.data.css)) keyframes.add(name);
+    }
     for (const [id, node] of Object.entries(parsed.data.nodes)) {
       const existing = fileOf.get(id);
       if (existing) {
@@ -112,7 +139,7 @@ export function validateProject({
     }
   }
 
-  const context: Context = { project, tokens, nodes, fileOf, issues };
+  const context: Context = { project, tokens, nodes, fileOf, issues, keyframes, colorValues: colorTokensByValue(tokens) };
   checkStructure(context);
   checkComponents(context);
   checkContent(context);
@@ -349,6 +376,7 @@ function checkPatchTargets(
       });
     }
     if (patch.style) checkStyle(context, { nodeId: ownerId, style: patch.style, label: `${label} ${target}` });
+    if (patch.css) checkCss(context, { nodeId: ownerId, css: patch.css, label: `${label} ${target} css` });
   }
 }
 
@@ -374,6 +402,7 @@ function checkContent(context: Context) {
   const icons = lucideIconNames();
   for (const [id, node] of Object.entries(nodes)) {
     if (node.style) checkStyle(context, { nodeId: id, style: node.style, label: "style" });
+    if (node.css) checkCss(context, { nodeId: id, css: node.css, label: "css" });
     if (node.type === "icon" && !icons.has(node.icon)) {
       push(context, {
         severity: "error",
@@ -405,16 +434,43 @@ function checkContent(context: Context) {
   }
 }
 
+function checkCss(context: Context, { nodeId, css, label }: { nodeId: string; css: string; label: string }) {
+  for (const problem of checkNodeCss(css)) {
+    push(context, {
+      severity: "error",
+      code: "node-css",
+      nodeId,
+      message: `${label}${problem.line ? ` line ${problem.line}` : ""}: ${problem.message}`,
+      fix: "write plain CSS: declarations, then nested rules like `&:hover { … }`",
+    });
+  }
+  for (const name of animationNamesUsed(css)) {
+    if (context.keyframes.has(name)) continue;
+    push(context, {
+      severity: "warning",
+      code: "unknown-keyframes",
+      nodeId,
+      message: `${label}: animation uses @keyframes ${name}, which no design file or app stylesheet defines`,
+      fix: didYouMean(name, context.keyframes) || `add \`@keyframes ${name} { … }\` to the file's "css"`,
+    });
+  }
+  for (const ref of tokenRefs(css)) {
+    if (context.tokens.tokens[ref]) continue;
+    push(context, {
+      severity: "error",
+      code: "unknown-token",
+      nodeId,
+      message: `${label}: references unknown token {${ref}}`,
+      fix: didYouMean(ref, Object.keys(context.tokens.tokens)) || "run `lamsa tokens` to list tokens",
+    });
+  }
+}
+
 function checkStyle(
   context: Context,
   { nodeId, style, label }: { nodeId: string; style: Style; label: string },
 ) {
-  const { tokens } = context;
-  const colorValues = new Map<string, string>();
-  const byPreference = Object.values(tokens.tokens).sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin));
-  for (const token of byPreference) {
-    if (token.kind === "color") colorValues.set(normaliseColor(token.values.light), token.path);
-  }
+  const { tokens, colorValues } = context;
   for (const [property, value] of Object.entries(style)) {
     if (!KEBAB_PROPERTY.test(property)) {
       push(context, {

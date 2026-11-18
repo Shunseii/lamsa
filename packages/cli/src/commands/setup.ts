@@ -4,8 +4,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  allNodes,
   CONFIG_FILE,
   detectTokenSource,
+  didYouMean,
   findProjectRoot,
   isDesignFile,
   loadProject,
@@ -161,9 +163,11 @@ export async function openCommand({
 }: {
   out: Output;
   file?: string;
-  select?: string;
+  select?: string[];
 }): Promise<number> {
   const root = resolveRoot();
+  const ids = [...new Set((select ?? []).map((id) => id.trim()).filter(Boolean))];
+  if (ids.length) await checkNodesExist({ root, ids });
   const app = process.env.LAMSA_DESKTOP_BIN ?? findOnPath("lamsa-desktop");
   if (!app) {
     throw new CliError(
@@ -174,9 +178,21 @@ export async function openCommand({
   }
   const args = [`--root=${root}`];
   if (file) args.push(`--file=${toRepoPath(root, file)}`);
-  if (select) args.push(`--select=${select}`);
+  if (ids.length) args.push(`--select=${ids.join(",")}`);
   const child = spawn(app, args, { detached: true, stdio: "ignore" });
   child.unref();
-  out.result({ ok: true, app, args }, () => `opened lamsa${file ? ` on ${file}` : ""}${select ? ` with ${select} selected` : ""}`);
+  out.result({ ok: true, app, args, select: ids }, () => `opened lamsa${file ? ` on ${file}` : ""}${ids.length ? ` with ${ids.join(", ")} selected` : ""}`);
   return ExitCode.ok;
+}
+
+async function checkNodesExist({ root, ids }: { root: string; ids: string[] }): Promise<void> {
+  const project = await loadProject(root);
+  const nodes = allNodes(project);
+  const missing = ids.filter((id) => !nodes[id.split("/")[0]!]);
+  if (missing.length === 0) return;
+  throw new CliError(
+    `no node with ID ${missing.join(", ")}`,
+    ExitCode.notFound,
+    missing.map((id) => didYouMean(id, Object.keys(nodes))).filter(Boolean).join("; ") || "run `lamsa tree` to list nodes",
+  );
 }

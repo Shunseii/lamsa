@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,10 +16,15 @@ let app: ElectronApplication;
 let page: Page;
 
 /** The example project as committed, so local experiments in examples/ don't change test results. */
-function copyExample(dest: string) {
+function copyExample(dest: string, { openAll = true }: { openAll?: boolean } = {}) {
   const archive = spawnSync("git", ["archive", "HEAD", "examples/shadcn-app"], { cwd: repo, maxBuffer: 64 * 1024 * 1024 });
   const untar = spawnSync("tar", ["-x", "-C", dest, "--strip-components=2"], { input: archive.stdout });
   if (archive.status !== 0 || untar.status !== 0) throw new Error(`could not copy the example: ${archive.stderr}${untar.stderr}`);
+  if (!openAll) return;
+  // Most tests want every file open, as if the user had already answered the first-open prompt.
+  const designs = readdirSync(join(dest, "designs")).filter((name) => name.endsWith(".lamsa.json"));
+  mkdirSync(join(dest, ".lamsa"), { recursive: true });
+  writeFileSync(join(dest, ".lamsa/session.json"), JSON.stringify({ selection: [], open: designs.map((name) => `designs/${name}`) }));
 }
 
 function lamsa(...args: string[]) {
@@ -757,4 +762,435 @@ describe("desktop editor selection and moving", () => {
     await win.keyboard.press("Control+g");
     await expect.poll(() => win.getByTestId("toasts").textContent()).toContain("Main components stay at the top level");
   });
+});
+
+describe("desktop editor animation preview", () => {
+  let motionRoot: string;
+  let motionApp: ElectronApplication;
+  let win: Page;
+  const checkout = () => JSON.parse(readFileSync(join(motionRoot, "designs/checkout.lamsa.json"), "utf8")) as { css?: string; nodes: Record<string, Record<string, unknown>> };
+
+  beforeAll(async () => {
+    motionRoot = mkdtempSync(join(tmpdir(), "lamsa-motion-"));
+    copyExample(motionRoot);
+    const design = checkout();
+    design.css = "@keyframes rise { from { translate: 0 12px; opacity: 0; } }";
+    design.nodes.QkpksTeC!.css = 'transition: scale 150ms ease-out;\n&:hover { scale: 1.05; }\n&[data-state="open"] { scale: 0.9; }';
+    design.nodes.Rwwc3Sdq!.css = "animation: rise 300ms ease-out both;";
+    design.css += "\n::view-transition-group(hero) { animation-duration: 400ms; }";
+    design.nodes["08JQi0tV"]!.css = "view-transition-name: hero;";
+    design.nodes.DoneFrm1 = { type: "frame", name: "Checkout · Done", index: "a9", x: 600, y: 0, css: "view-transition-name: hero;", style: { width: 320, height: 200, background: "{color.muted}" } };
+    design.nodes.DoneTxt1 = { type: "text", name: "Thanks", parentId: "DoneFrm1", index: "a0", content: "Order placed" };
+    writeFileSync(join(motionRoot, "designs/checkout.lamsa.json"), JSON.stringify(design, null, 2));
+    motionApp = await _electron.launch({
+      executablePath: ELECTRON,
+      args: [DESKTOP, "--root", motionRoot, "--select", "QkpksTeC"],
+      env: { ...process.env, LAMSA_HIDDEN: "1", LAMSA_MULTI_INSTANCE: "1" },
+    });
+    win = await motionApp.firstWindow();
+    await win.getByTestId("layers-panel").waitFor();
+    await win.waitForTimeout(400);
+  }, 60_000);
+
+  afterAll(async () => {
+    await motionApp?.close();
+  });
+
+  it("shows motion at rest on the canvas", async () => {
+    const running = await win.evaluate(() =>
+      [...document.querySelectorAll(".frame-host")].flatMap((h) => h.shadowRoot?.getAnimations() ?? []).filter((a) => a.playState === "running").length,
+    );
+    expect(running).toBe(0);
+    const hovered = await win.evaluate(() => {
+      const host = [...document.querySelectorAll(".frame-host")].find((h) => h.shadowRoot?.querySelector('[data-node-id="QkpksTeC"]'));
+      return host?.shadowRoot?.querySelector("style")?.textContent?.includes(":hover");
+    });
+    expect(hovered).toBe(false);
+  });
+
+  it("previews the selected layers from the context menu and forces states on them", async () => {
+    await win.getByTestId("layers-panel").locator(".layer-row.is-selected").first().click({ button: "right" });
+    await win.getByTestId("context-menu").getByText("Preview animations").click();
+    const panel = win.getByTestId("preview-panel");
+    await panel.getByTestId("preview-cell").waitFor();
+    await expect.poll(() => panel.getByTestId("preview-states").textContent()).toBe("Noneopen");
+    const layer = () =>
+      win.evaluate(() => {
+        const root = document.querySelector('[data-testid="preview-cell"] .preview-render > div')?.shadowRoot;
+        const el = root?.querySelector('[data-node-id="QkpksTeC"]');
+        const box = el!.getBoundingClientRect();
+        return { scale: getComputedStyle(el!).scale, state: el?.getAttribute("data-state"), x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      });
+    const { x, y } = await layer();
+    await win.mouse.move(x, y);
+    await expect.poll(async () => (await layer()).scale).toBe("1.05");
+    await win.mouse.move(0, 0);
+    await expect.poll(async () => (await layer()).scale).toBe("none");
+    await panel.getByTestId("preview-states").getByText("open").click();
+    await expect.poll(async () => (await layer()).state).toBe("open");
+
+    const cellWidth = async () => (await panel.getByTestId("preview-cell").boundingBox())!.width;
+    const before = await cellWidth();
+    await panel.getByLabel("Zoom in").click();
+    await expect.poll(() => panel.getByTestId("preview-zoom").textContent()).toContain("125%");
+    await expect.poll(cellWidth).toBeCloseTo(before * 1.25, 0);
+    await panel.press("0");
+    await expect.poll(cellWidth).toBeCloseTo(before, 0);
+
+    await panel.getByTestId("preview-fullscreen").click();
+    const props = (await win.getByTestId("properties-panel").boundingBox())!;
+    const full = (await panel.boundingBox())!;
+    expect(full.height).toBeGreaterThan(500);
+    expect(full.x + full.width).toBeLessThanOrEqual(props.x);
+    await panel.press("Escape");
+    await expect.poll(async () => (await panel.boundingBox())!.height).toBeLessThan(full.height);
+    await panel.press("Escape");
+    await panel.waitFor({ state: "detached" });
+  });
+
+  it("edits a layer's CSS as plain text and saves it formatted", async () => {
+    const editor = win.getByTestId("css-editor");
+    await editor.scrollIntoViewIfNeeded();
+    await editor.locator(".cm-content").click();
+    await win.keyboard.press("Control+End");
+    await win.keyboard.type("\n&:active{scale:0.97}");
+    await win.getByTestId("properties-panel").locator(".props-header").click();
+    await expect.poll(() => checkout().nodes.QkpksTeC?.css).toContain("&:active {\n  scale: 0.97;\n}");
+  });
+
+  it("plays page transitions between whole frames in flow mode", async () => {
+    const rows = win.getByTestId("layers-panel").locator(".layer-row");
+    await rows.filter({ hasText: "Checkout · Default" }).click();
+    await rows.filter({ hasText: "Checkout · Done" }).click({ modifiers: ["Control"] });
+    await rows.filter({ hasText: "Checkout · Done" }).click({ button: "right" });
+    await win.getByTestId("context-menu").getByText("Preview animations").click();
+    const panel = win.getByTestId("preview-panel");
+    await panel.getByTestId("preview-mode").getByText("Flow").click();
+    await expect.poll(() => panel.getByTestId("preview-flow-step").textContent()).toBe("1 / 2");
+    const frame = panel.getByTestId("preview-flow");
+    const inFrame = () =>
+      frame.evaluate((iframe: HTMLIFrameElement) => {
+        const doc = iframe.contentDocument!;
+        return {
+          shown: doc.querySelector("#lamsa-render > [data-node-id]")?.getAttribute("data-node-id"),
+          pseudo: doc.getAnimations().map((a) => (a.effect as KeyframeEffect | null)?.pseudoElement ?? ""),
+        };
+      });
+    await expect.poll(async () => (await inFrame()).shown).toBe("08JQi0tV");
+    await panel.getByText("0.1×").click();
+    await panel.press("ArrowRight");
+    await expect.poll(async () => (await inFrame()).pseudo).toContain("::view-transition-group(hero)");
+    await expect.poll(async () => (await inFrame()).shown).toBe("DoneFrm1");
+    await expect.poll(() => panel.getByTestId("preview-flow-step").textContent()).toBe("2 / 2");
+    await panel.press("ArrowLeft");
+    await expect.poll(async () => (await inFrame()).shown, { timeout: 15_000 }).toBe("08JQi0tV");
+    await panel.press("Escape");
+    await panel.waitFor({ state: "detached" });
+  });
+
+  it("edits a page transition from flow mode and writes it as CSS", async () => {
+    const rows = win.getByTestId("layers-panel").locator(".layer-row");
+    await rows.filter({ hasText: "Checkout · Default" }).click();
+    await rows.filter({ hasText: "Checkout · Done" }).click({ modifiers: ["Control"] });
+    await win.keyboard.press("p");
+    const panel = win.getByTestId("preview-panel");
+    await panel.getByTestId("preview-mode").getByText("Flow").click();
+    await expect.poll(() => panel.getByTestId("flow-arrow").count()).toBe(1);
+    const editor = panel.getByTestId("transition-editor");
+    const hero = editor.locator('[data-testid="shared-row"][data-target="hero"]');
+    await expect.poll(() => hero.textContent()).toContain("both");
+
+    await editor.getByTestId("page-preset").getByText("Slide").click();
+    await expect.poll(() => checkout().css ?? "").toContain("::view-transition-new(root)");
+    expect(checkout().css).toContain("@keyframes lamsa-slide-from-right");
+    expect(checkout().css).toContain("@keyframes rise");
+
+    const duration = hero.locator(".timing-duration input");
+    await duration.fill("520");
+    await duration.press("Enter");
+    await expect.poll(() => checkout().css ?? "").toMatch(/::view-transition-group\(hero\)\s*\{[^}]*animation-duration: 520ms/);
+
+    await editor.getByTestId("share-layer").click();
+    const add = editor.getByTestId("add-shared");
+    await add.locator("input").fill("thanks");
+    await add.getByTestId("pick-from").click();
+    const menu = win.getByTestId("layer-picker-menu");
+    expect(await menu.locator('[data-layer-id="08JQi0tV"]').isDisabled()).toBe(true);
+    const firstChild = await menu.locator(".menu-item").nth(1).getAttribute("data-layer-id");
+    await menu.locator(".menu-item").nth(1).click();
+    await add.getByTestId("pick-to").click();
+    await menu.locator('[data-layer-id="DoneTxt1"]').click();
+    await add.getByText("Share", { exact: true }).click();
+    await expect.poll(() => String(checkout().nodes.DoneTxt1?.css ?? "")).toContain("view-transition-name: thanks");
+    expect(String(checkout().nodes["08JQi0tV"]?.css)).toContain("hero");
+    expect(String(checkout().nodes[firstChild!]?.css)).toContain("view-transition-name: thanks");
+    await expect.poll(() => editor.locator('[data-target="thanks"]').count()).toBe(1);
+
+    await win.getByTestId("canvas").click({ position: { x: 5, y: 5 } });
+    await win.keyboard.press("Control+z");
+    await expect.poll(() => String(checkout().nodes.DoneTxt1?.css ?? "")).not.toContain("thanks");
+    await panel.press("Escape");
+    await panel.waitFor({ state: "detached" });
+  });
+
+  it("opens a frame's preview from its label, then zooms with the wheel and pans with the middle button", async () => {
+    const rows = win.getByTestId("layers-panel").locator(".layer-row");
+    await rows.filter({ hasText: "Checkout · Default" }).click();
+    await win.keyboard.press("Shift+Digit2");
+    const label = win.locator('.frame-label[data-label-for="08JQi0tV"]');
+    await label.hover();
+    await label.getByTestId("frame-label-play").click();
+    const panel = win.getByTestId("preview-panel");
+    await expect.poll(() => panel.getByTestId("preview-cell").count()).toBe(1);
+    await expect.poll(() => win.getByTestId("toggle-preview").getAttribute("class")).toContain("is-active");
+
+    const stage = panel.getByTestId("preview-stage");
+    const box = (await stage.boundingBox())!;
+    await win.mouse.move(box.x + box.width / 2, box.y + 40);
+    await win.mouse.wheel(0, -300);
+    await expect.poll(() => panel.getByTestId("preview-zoom").textContent()).not.toContain("100%");
+
+    const world = panel.locator(".preview-world");
+    const before = await world.evaluate((element) => getComputedStyle(element).transform);
+    await win.mouse.move(box.x + 40, box.y + 40);
+    await win.mouse.down({ button: "middle" });
+    await win.mouse.move(box.x + 120, box.y + 90, { steps: 4 });
+    await win.mouse.up({ button: "middle" });
+    await expect.poll(() => world.evaluate((element) => getComputedStyle(element).transform)).not.toBe(before);
+
+    await panel.press("0");
+    await expect.poll(() => panel.getByTestId("preview-zoom").textContent()).toContain("100%");
+    await win.getByTestId("toggle-preview").click();
+    await panel.waitFor({ state: "detached" });
+  });
+
+  it("shows the keyboard shortcuts from the toolbar or ?", async () => {
+    await win.getByTestId("open-shortcuts").click();
+    const help = win.getByTestId("shortcuts-help");
+    await expect.poll(() => help.getByText("Zoom to selection").count()).toBe(1);
+    await win.keyboard.press("Escape");
+    await help.waitFor({ state: "detached" });
+    await win.getByTestId("canvas").click({ position: { x: 5, y: 5 } });
+    await win.keyboard.press("Shift+Slash");
+    await help.waitFor();
+    await win.keyboard.press("Shift+Slash");
+    await help.waitFor({ state: "detached" });
+  });
+
+  it("keeps a closing side panel mounted until its exit transition ends", async () => {
+    const layers = win.getByTestId("layers-panel");
+    await win.keyboard.press("Control+BracketLeft");
+    await expect.poll(() => layers.evaluate((element) => element.parentElement?.getAttribute("data-state"))).toBe("closed");
+    await layers.waitFor({ state: "detached" });
+    await win.keyboard.press("Control+BracketLeft");
+    await layers.waitFor();
+  });
+
+  it("opens and scrolls a layer's row to the middle of the list when it's selected on the canvas", async () => {
+    const panel = win.getByTestId("layers-panel");
+    const rootRow = panel.locator('[data-layer-id="08JQi0tV"]');
+    if ((await rootRow.locator(".twisty.is-open").count()) > 0) await rootRow.locator(".twisty").click();
+    await expect.poll(() => panel.locator('.layer-row').evaluateAll((rows) => rows.length)).toBeGreaterThan(0);
+    const list = panel.locator(".panel-body");
+    await list.evaluate((el) => (el.scrollTop = el.scrollHeight));
+    const target = await win.evaluate(() => {
+      const host = document.querySelector('[data-root-id="08JQi0tV"]')!;
+      const inner = [...host.shadowRoot!.querySelectorAll("[data-node-id]")].at(-1) as HTMLElement;
+      const r = inner.getBoundingClientRect();
+      return { id: inner.getAttribute("data-node-id")!, x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await win.mouse.click(target.x, target.y);
+    const row = panel.locator(".layer-row.is-selected").first();
+    await row.waitFor();
+    const selectedId = await row.getAttribute("data-layer-id");
+    expect(selectedId).not.toBe("08JQi0tV");
+    const inView = () =>
+      row.evaluate((element) => {
+        const box = element.closest(".panel-body")!.getBoundingClientRect();
+        const r = element.getBoundingClientRect();
+        const scroller = element.closest(".panel-body")!;
+        const centred = Math.abs(r.top + r.height / 2 - (box.top + box.height / 2)) < 2;
+        const atEnd = scroller.scrollTop <= 0 || scroller.scrollTop + 2 >= scroller.scrollHeight - scroller.clientHeight;
+        return centred || atEnd;
+      });
+    await expect.poll(inView).toBe(true);
+    await win.keyboard.press("Escape");
+  });
+});
+
+describe("desktop editor open files", () => {
+  let filesRoot: string;
+  let outside: string;
+  let filesApp: ElectronApplication;
+  let win: Page;
+  const session = () => JSON.parse(readFileSync(join(filesRoot, ".lamsa/session.json"), "utf8")) as { open?: string[] };
+  const shownRoots = () => win.evaluate(() => [...document.querySelectorAll(".frame-host")].map((host) => host.getAttribute("data-root-id")));
+  const fileHeaders = () => win.getByTestId("layers-panel").locator(".layer-file").allTextContents();
+  const extra = (name: string, title: string) =>
+    JSON.stringify({ version: 1, nodes: { [`${name}Frm1`]: { type: "frame", name: title, x: 2000, y: 0, style: { width: 200, height: 120, background: "{color.muted}" } } } });
+
+  beforeAll(async () => {
+    filesRoot = mkdtempSync(join(tmpdir(), "lamsa-files-"));
+    copyExample(filesRoot, { openAll: false });
+    outside = mkdtempSync(join(tmpdir(), "lamsa-outside-"));
+    writeFileSync(join(outside, "elsewhere.lamsa.json"), extra("Elsw", "Elsewhere"));
+    filesApp = await _electron.launch({
+      executablePath: ELECTRON,
+      args: [DESKTOP, "--root", filesRoot],
+      env: { ...process.env, LAMSA_HIDDEN: "1", LAMSA_MULTI_INSTANCE: "1" },
+    });
+    win = await filesApp.firstWindow();
+    await win.getByTestId("open-files-dialog").waitFor();
+  }, 60_000);
+
+  afterAll(async () => {
+    await filesApp?.close();
+  });
+
+  it("asks which files to open the first time, and remembers the answer", async () => {
+    const dialog = win.getByTestId("open-files-dialog");
+    expect(await dialog.locator("[data-file]").count()).toBe(2);
+    await dialog.locator('[data-file="designs/checkout.lamsa.json"]').click();
+    await dialog.getByTestId("open-files-confirm").click();
+    await dialog.waitFor({ state: "detached" });
+    expect(session().open).toEqual(["designs/checkout.lamsa.json"]);
+    expect(await fileHeaders()).toEqual(["checkout.lamsa.json"]);
+    // The Button component lives in a file that isn't open, but its instances still render.
+    await expect.poll(() => win.evaluate(() => document.querySelector(".frame-host")?.shadowRoot?.textContent ?? "")).toContain("Pay");
+  });
+
+  it("adds a project file from the layers panel and closes it again", async () => {
+    await win.getByTestId("layers-panel").getByTestId("add-file").click();
+    await win.getByTestId("add-file-menu").locator('[data-file="designs/components.lamsa.json"]').click();
+    await expect.poll(fileHeaders).toEqual(["checkout.lamsa.json", "components.lamsa.json"]);
+    expect(session().open).toEqual(["designs/checkout.lamsa.json", "designs/components.lamsa.json"]);
+    const header = win.getByTestId("layers-panel").locator(".layer-file", { hasText: "components.lamsa.json" });
+    await header.hover();
+    await header.getByRole("button", { name: /Close/ }).click();
+    await expect.poll(fileHeaders).toEqual(["checkout.lamsa.json"]);
+    expect(session().open).toEqual(["designs/checkout.lamsa.json"]);
+  });
+
+  it("opens files the agent creates, and files from outside the repo", async () => {
+    writeFileSync(join(filesRoot, "designs/new.lamsa.json"), extra("Newf", "New screen"));
+    await expect.poll(fileHeaders).toContain("new.lamsa.json");
+    await expect.poll(shownRoots).toContain("NewfFrm1");
+
+    const result = await win.evaluate((path) => window.lamsa.addFiles([path]), join(outside, "elsewhere.lamsa.json"));
+    const key = result.open.find((path) => path.endsWith("elsewhere.lamsa.json"))!;
+    expect(key.startsWith("../")).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(session().open).toContain(key);
+    // A reload restores the session, including the file outside the repo.
+    await win.reload();
+    await win.getByTestId("layers-panel").waitFor();
+    await expect.poll(shownRoots).toContain("ElswFrm1");
+    expect(await win.getByTestId("open-files-dialog").count()).toBe(0);
+  });
+
+  it("keeps files apart on the canvas and moves a whole file by its name", async () => {
+    const labelCount = () => win.locator(".file-label").count();
+    const frameBoxes = () =>
+      win.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>(".frame-host")].map((host) => {
+          const r = host.getBoundingClientRect();
+          return { id: host.getAttribute("data-root-id")!, left: r.left, right: r.right };
+        }),
+      );
+    // Close and reopen files in an order that used to put two of them in the same place.
+    await win.getByTestId("layers-panel").getByTestId("add-file").click();
+    await win.getByTestId("add-file-menu").locator('[data-file="designs/components.lamsa.json"]').click();
+    await expect.poll(labelCount).toBe(4);
+    const spans = async () => {
+      const boxes = await frameBoxes();
+      const labels = await win.evaluate(() => [...document.querySelectorAll<HTMLElement>(".file-label")].map((l) => ({ file: l.dataset.file!, left: l.getBoundingClientRect().left })));
+      labels.sort((a, b) => a.left - b.left);
+      return labels.map((label, i) => {
+        const next = labels[i + 1]?.left ?? Infinity;
+        const own = boxes.filter((b) => b.left >= label.left - 1 && b.left < next - 1);
+        return { file: label.file, left: Math.min(...own.map((b) => b.left)), right: Math.max(...own.map((b) => b.right)) };
+      });
+    };
+    const ranges = await spans();
+    for (let i = 1; i < ranges.length; i++) expect(ranges[i]!.left).toBeGreaterThan(ranges[i - 1]!.right);
+
+    await win.keyboard.press("Escape");
+    await win.keyboard.press("Shift+Digit1");
+    await win.waitForTimeout(300);
+    const label = win.locator('.file-label[data-file="designs/checkout.lamsa.json"]');
+    const before = JSON.parse(readFileSync(join(filesRoot, "designs/checkout.lamsa.json"), "utf8")).nodes as Record<string, { parentId?: string; x?: number }>;
+    const roots = Object.entries(before).filter(([, n]) => n.parentId === undefined).map(([id]) => id);
+    const box = (await label.boundingBox())!;
+    await win.mouse.move(box.x + 10, box.y + box.height / 2);
+    await win.mouse.down();
+    await expect.poll(() => win.getByTestId("status-bar").textContent()).toContain(`${roots.length} selected`);
+    await win.mouse.move(box.x + 70, box.y + box.height / 2 + 20, { steps: 6 });
+    await win.mouse.up();
+    await expect
+      .poll(() => {
+        const after = JSON.parse(readFileSync(join(filesRoot, "designs/checkout.lamsa.json"), "utf8")).nodes as Record<string, { x?: number }>;
+        return roots.every((id) => (after[id]?.x ?? 0) > (before[id]?.x ?? 0));
+      })
+      .toBe(true);
+  });
+
+  it("goes back to the welcome screen from the project menu, and reopens the project from there", async () => {
+    await win.getByTestId("project-menu").click();
+    await win.getByTestId("go-home").click();
+    const welcome = win.getByTestId("welcome");
+    await welcome.waitFor();
+    await welcome.locator(`.recent-open[title="${filesRoot}"]`).click();
+    await win.getByTestId("layers-panel").waitFor();
+    // The session comes back with it: same files open, no prompt.
+    expect(await win.getByTestId("open-files-dialog").count()).toBe(0);
+    await expect.poll(() => win.getByTestId("layers-panel").locator(".layer-file").count()).toBeGreaterThan(0);
+    await expect.poll(() => win.getByTestId("project-menu").textContent()).toContain(filesRoot.split("/").pop()!);
+  });
+
+  it("opens with several layers selected, opening the files they're in instead of asking", async () => {
+    const fresh = mkdtempSync(join(tmpdir(), "lamsa-files-"));
+    copyExample(fresh, { openAll: false });
+    const other = await _electron.launch({
+      executablePath: ELECTRON,
+      args: [DESKTOP, "--root", fresh, "--select", "QkpksTeC,Inp00001", "--select", "Btn00001"],
+      env: { ...process.env, LAMSA_HIDDEN: "1", LAMSA_MULTI_INSTANCE: "1" },
+    });
+    try {
+      const page = await other.firstWindow();
+      await expect
+        .poll(() => page.getByTestId("layers-panel").locator(".layer-file").allTextContents())
+        .toEqual(["checkout.lamsa.json", "components.lamsa.json"]);
+      const selected = () => (JSON.parse(readFileSync(join(fresh, ".lamsa/session.json"), "utf8")) as { selection: string[] }).selection.slice().sort();
+      await expect.poll(selected).toEqual(["Btn00001", "Inp00001", "QkpksTeC"]);
+      expect(await page.getByTestId("open-files-dialog").count()).toBe(0);
+    } finally {
+      await other.close();
+    }
+  }, 60_000);
+
+  it("opens nothing when the prompt is dismissed, and offers to open a file from the empty canvas", async () => {
+    const fresh = mkdtempSync(join(tmpdir(), "lamsa-files-"));
+    copyExample(fresh, { openAll: false });
+    const other = await _electron.launch({
+      executablePath: ELECTRON,
+      args: [DESKTOP, "--root", fresh],
+      env: { ...process.env, LAMSA_HIDDEN: "1", LAMSA_MULTI_INSTANCE: "1" },
+    });
+    try {
+      const page = await other.firstWindow();
+      const dialog = page.getByTestId("open-files-dialog");
+      await dialog.waitFor();
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "detached" });
+      const empty = page.getByTestId("no-files-open");
+      await empty.waitFor();
+      expect(JSON.parse(readFileSync(join(fresh, ".lamsa/session.json"), "utf8")).open).toEqual([]);
+      await empty.getByTestId("add-file").click();
+      await page.getByTestId("add-file-menu").locator('[data-file="designs/checkout.lamsa.json"]').click();
+      await empty.waitFor({ state: "detached" });
+      await expect.poll(() => page.getByTestId("layers-panel").locator(".layer-file").allTextContents()).toEqual(["checkout.lamsa.json"]);
+    } finally {
+      await other.close();
+    }
+  }, 60_000);
 });

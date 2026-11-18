@@ -1,10 +1,14 @@
+import { useShallow } from "zustand/react/shallow";
 import { MousePointer2, Move, Palette } from "lucide-react";
 import { useEditor } from "../lib/store";
 import { cn } from "../lib/cn";
 
 export function StatusBar() {
-  const { files, pending, snapshot, selection, model, lastError, issues } = useEditor();
-  const count = Object.keys(files).length;
+  const { files, pending, snapshot, selection, model, lastError, issues, openFiles } = useEditor(
+    useShallow((s) => ({ files: s.files, pending: s.pending, snapshot: s.snapshot, selection: s.selection, model: s.model, lastError: s.lastError, issues: s.issues, openFiles: s.openFiles })),
+  );
+  const count = openFiles?.length ?? 0;
+  const total = Object.keys(files).length;
   const invalid = Object.values(files).filter((f) => f.error).length;
   const errors = issues.filter((i) => i.severity === "error").length;
   const first = selection[0] ? model.nodes[selection[0]] : undefined;
@@ -13,7 +17,7 @@ export function StatusBar() {
     <div className="bar bar-status" data-testid="status-bar">
       <span className={cn("status-dot", lastError || invalid ? "is-danger" : "is-ok")} />
       <span>
-        Watching {count} file{count === 1 ? "" : "s"} · {state}
+        {count} of {total} file{total === 1 ? "" : "s"} open · {state}
         {invalid ? ` · ${invalid} invalid` : ""}
       </span>
       <span className="muted status-optional">

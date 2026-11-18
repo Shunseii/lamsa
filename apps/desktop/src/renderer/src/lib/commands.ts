@@ -2,7 +2,7 @@ import type { DesignNode } from "@lamsa/schema";
 import type { NodeChange } from "../../../shared/api";
 import { deleteSubtrees, detachInstance, duplicate, fromNested, groupIntoFrame, insertNodes, toNested, topmost } from "./edits";
 import { hiddenByDefault, isLocked, rootOf } from "./model";
-import { useEditor } from "./store";
+import { firstOpenFile, useEditor } from "./store";
 import { fitTo, measuredSize, zoomBy, zoomTo } from "./viewport";
 
 export type CommandName =
@@ -25,12 +25,17 @@ export type CommandName =
   | "go-to-main"
   | "detach"
   | "toggle-hidden"
-  | "toggle-locked";
+  | "toggle-locked"
+  | "preview-animations";
 
 export async function runCommand(name: CommandName): Promise<void> {
   const state = useEditor.getState();
   const { model, selection, commit, select } = state;
   switch (name) {
+    case "preview-animations": {
+      if (selection.length) state.openPreview(topmost(model, selection));
+      return;
+    }
     case "copy":
     case "cut": {
       const ids = topmost(model, selection);
@@ -55,7 +60,7 @@ export async function runCommand(name: CommandName): Promise<void> {
       const target = selection[0];
       const targetNode = target ? model.nodes[target] : undefined;
       const parentId = targetNode?.type === "frame" && targetNode.parentId !== undefined ? target : targetNode?.parentId;
-      const file = target ? model.fileOf.get(target) : Object.keys(state.files)[0];
+      const file = target ? model.fileOf.get(target) : firstOpenFile(state);
       if (!parentId) {
         for (const entry of entries) {
           const x = (entry.root.node.x ?? 0) + 40;
@@ -221,10 +226,27 @@ export function installShortcuts(): () => void {
         state.togglePanel("properties");
         return;
       }
+      if (key === "o" && !e.shiftKey) {
+        e.preventDefault();
+        void import("../panels/ProjectMenu").then((m) => m.openAnotherProject());
+        return;
+      }
       if (key === "j") {
         e.preventDefault();
         state.togglePanel("terminal");
         return;
+      }
+      return;
+    }
+    if (e.key === "?") {
+      e.preventDefault();
+      state.setHelp(!state.help);
+      return;
+    }
+    if (state.help) {
+      if (key === "escape") {
+        e.preventDefault();
+        state.setHelp(false);
       }
       return;
     }
@@ -253,6 +275,7 @@ export function installShortcuts(): () => void {
       state.setTool(tools[key]!);
       return;
     }
+    if (key === "p" && !e.shiftKey && !e.altKey) return run("preview-animations");
     if (key === "i" && !e.shiftKey) {
       e.preventDefault();
       void import("../panels/Toolbar").then((m) => m.insertImage());

@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import type { DesignNode, Token, TokenKind } from "@lamsa/schema";
 import { Braces, Check, ChevronDown, Component, Copy, Plus, Target, Unlink, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -5,6 +6,7 @@ import { detachInstance, parseStyleInput, patchNodes, setStyle } from "../lib/ed
 import { nodeTitle, type Model } from "../lib/model";
 import { useEditor } from "../lib/store";
 import { fitTo } from "../lib/viewport";
+import { CssEditor } from "./CssEditor";
 import { AutocompleteInput, type Suggestion } from "./AutocompleteInput";
 import { IconField } from "./IconField";
 import { Popover } from "./Popover";
@@ -170,7 +172,9 @@ function valueOf(nodes: DesignNode[], property: string): string | typeof MIXED {
 }
 
 export function PropertiesPanel() {
-  const { selection, model, snapshot, issues } = useEditor();
+  const { selection, model, snapshot, issues } = useEditor(
+    useShallow((s) => ({ selection: s.selection, model: s.model, snapshot: s.snapshot, issues: s.issues })),
+  );
   const nodes = selection.map((id) => model.nodes[id]).filter((n): n is DesignNode => !!n);
 
   if (nodes.length === 0) {
@@ -203,7 +207,9 @@ export function PropertiesPanel() {
 }
 
 function SelectionProperties({ ids, nodes }: { ids: string[]; nodes: DesignNode[] }) {
-  const { model, commit, snapshot } = useEditor();
+  const { model, commit, snapshot } = useEditor(
+    useShallow((s) => ({ model: s.model, commit: s.commit, snapshot: s.snapshot })),
+  );
   const types = new Set(nodes.map((n) => n.type));
   const layout: LayoutContext = {
     displays: nodes.map((n) => effectiveDisplay(model, n)),
@@ -213,6 +219,10 @@ function SelectionProperties({ ids, nodes }: { ids: string[]; nodes: DesignNode[
   const singleId = single ? ids[0]! : undefined;
   const addProp = useRef<HTMLDivElement>(null);
   const tokens = snapshot?.tokens.tokens ?? {};
+  const keyframes = useMemo(
+    () => [...new Set([...(snapshot?.tokens.keyframes ?? []), ...[...model.fileCss.matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]!)])].sort(),
+    [snapshot, model.fileCss],
+  );
 
   const extra = useMemo(() => {
     const props = new Set<string>();
@@ -317,6 +327,19 @@ function SelectionProperties({ ids, nodes }: { ids: string[]; nodes: DesignNode[
           </Section>
         ))}
 
+        {single && singleId && (
+          <Section title="Animation">
+            <CssEditor
+              key={singleId}
+              value={single.css ?? ""}
+              tokens={tokens}
+              keyframes={keyframes}
+              placeholderText={"transition: scale 150ms ease-out;\n&:hover { scale: 1.02; }"}
+              onCommit={(text) => void commit("Edit CSS", patchNodes(model, ids, (n) => ({ ...n, css: text || undefined }) as DesignNode))}
+            />
+          </Section>
+        )}
+
         <Section title="Other CSS">
           {extra.map((property) => {
             const value = valueOf(nodes, property);
@@ -357,7 +380,9 @@ function SelectionProperties({ ids, nodes }: { ids: string[]; nodes: DesignNode[
 }
 
 function MainComponentSection({ id, node }: { id: string; node: Extract<DesignNode, { type: "frame" }> }) {
-  const { model, commit, previewProps, setPreviewProp } = useEditor();
+  const { model, commit, previewProps, setPreviewProp } = useEditor(
+    useShallow((s) => ({ model: s.model, commit: s.commit, previewProps: s.previewProps, setPreviewProp: s.setPreviewProp })),
+  );
   const definitions = node.component?.props ?? {};
   const preview = previewProps[id] ?? {};
   const instances = Object.values(model.nodes).filter((n) => n.type === "instance" && n.componentId === id).length;
@@ -423,7 +448,9 @@ function MainComponentSection({ id, node }: { id: string; node: Extract<DesignNo
 }
 
 function InstanceSection({ id, node }: { id: string; node: Extract<DesignNode, { type: "instance" }> }) {
-  const { model, commit, select } = useEditor();
+  const { model, commit, select } = useEditor(
+    useShallow((s) => ({ model: s.model, commit: s.commit, select: s.select })),
+  );
   const component = model.nodes[node.componentId];
   const definitions = component?.type === "frame" ? (component.component?.props ?? {}) : {};
   const setProp = (name: string, value: string | boolean) =>
@@ -533,7 +560,7 @@ function Section({ title, children, collapsible }: { title: string; children: Re
   );
 }
 
-function CommitInput({
+export function CommitInput({
   value,
   onCommit,
   className,

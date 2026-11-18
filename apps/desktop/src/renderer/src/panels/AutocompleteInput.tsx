@@ -29,6 +29,7 @@ export function AutocompleteInput({
   onArrowDownWhenClosed,
   commitOnBlur = true,
   clearOnCommit = false,
+  openOnFocus = false,
   testId,
 }: {
   value: string;
@@ -40,6 +41,8 @@ export function AutocompleteInput({
   onArrowDownWhenClosed?: () => void;
   commitOnBlur?: boolean;
   clearOnCommit?: boolean;
+  /** Shows the suggestions as soon as the input is focused, for a short fixed list. */
+  openOnFocus?: boolean;
   testId?: string;
 }) {
   const [draft, setDraft] = useState(value);
@@ -93,6 +96,10 @@ export function AutocompleteInput({
         onFocus={() => {
           focused.current = true;
           committed.current = false;
+          if (openOnFocus) {
+            setActive(0);
+            setOpen(true);
+          }
         }}
         onChange={(e) => {
           setDraft(e.target.value);

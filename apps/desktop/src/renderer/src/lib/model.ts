@@ -8,6 +8,8 @@ export interface Model {
   fileOf: Map<string, string>;
   roots: string[];
   children: Map<string, string[]>;
+  /** Every file's `css` (its `@keyframes`), in path order. */
+  fileCss: string;
 }
 
 const byIndex = (nodes: NodeMap) => (a: string, b: string) => {
@@ -16,7 +18,13 @@ const byIndex = (nodes: NodeMap) => (a: string, b: string) => {
   return ia < ib ? -1 : ia > ib ? 1 : a < b ? -1 : a > b ? 1 : 0;
 };
 
-export function buildModel(files: Record<string, FileState>): Model {
+/**
+ * Every file's nodes are indexed (instances need components from files that aren't open), but only
+ * frames in `open` files are roots, i.e. shown on the canvas and in the layers list. `null` means the
+ * user hasn't picked files yet, so nothing is shown; leaving it out shows everything.
+ */
+export function buildModel(files: Record<string, FileState>, open?: readonly string[] | null): Model {
+  const shown = open === undefined ? null : new Set(open ?? []);
   const nodes: NodeMap = {};
   const fileOf = new Map<string, string>();
   for (const path of Object.keys(files).sort()) {
@@ -30,7 +38,7 @@ export function buildModel(files: Record<string, FileState>): Model {
   const children = new Map<string, string[]>();
   for (const [id, node] of Object.entries(nodes)) {
     if (node.parentId === undefined || !nodes[node.parentId]) {
-      if (node.parentId === undefined) roots.push(id);
+      if (node.parentId === undefined && (!shown || shown.has(fileOf.get(id)!))) roots.push(id);
       continue;
     }
     const list = children.get(node.parentId) ?? [];
@@ -44,7 +52,12 @@ export function buildModel(files: Record<string, FileState>): Model {
     const fb = fileOf.get(b)!;
     return fa < fb ? -1 : fa > fb ? 1 : order(a, b);
   });
-  return { nodes, fileOf, roots, children };
+  const fileCss = Object.keys(files)
+    .sort()
+    .map((path) => files[path]!.css ?? "")
+    .filter((css) => css.trim())
+    .join("\n");
+  return { nodes, fileOf, roots, children, fileCss };
 }
 
 export function childrenOf(model: Model, id: string): string[] {
@@ -53,11 +66,12 @@ export function childrenOf(model: Model, id: string): string[] {
 
 export function descendantsOf(model: Model, id: string): string[] {
   const result: string[] = [];
-  const stack = [...childrenOf(model, id)];
+  const stack = [...childrenOf(model, id)].reverse();
   while (stack.length) {
-    const next = stack.shift()!;
+    const next = stack.pop()!;
     result.push(next);
-    stack.unshift(...childrenOf(model, next));
+    const kids = childrenOf(model, next);
+    for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]!);
   }
   return result;
 }
@@ -133,10 +147,14 @@ let placedProject: string | undefined;
 
 /**
  * Files sit side by side on the canvas; each file's own x/y are offset by `dx`.
- * A file keeps the offset it got when it first appeared, so moving its frames
- * never shifts the file (or the files next to it) under the pointer.
+ * A file keeps the offset it got when it first appeared, so moving its frames never shifts the file
+ * (or the files next to it) under the pointer. The one exception is an overlap: when a file grows or
+ * is moved into the next one, the next one is pushed right just far enough to clear it. A file that
+ * is closed forgets its place, so reopening it puts it after the files that are open.
+ *
+ * `widthOf` gives a frame's rendered width when it's on screen; until then a fixed width is used.
  */
-export function fileRegions(model: Model, project?: string): Map<string, FileRegion> {
+export function fileRegions(model: Model, project?: string, widthOf?: (id: string) => number | undefined): Map<string, FileRegion> {
   if (project !== placedProject) {
     placedOffsets.clear();
     placedProject = project;
@@ -145,26 +163,38 @@ export function fileRegions(model: Model, project?: string): Map<string, FileReg
   for (const id of model.roots) {
     const file = model.fileOf.get(id)!;
     const node = model.nodes[id]!;
-    const width = typeof node.style?.width === "number" ? node.style.width : 400;
+    const width = widthOf?.(id) || (typeof node.style?.width === "number" ? node.style.width : 400);
     const extent = extents.get(file) ?? { minX: Infinity, maxX: -Infinity, minY: Infinity };
     extent.minX = Math.min(extent.minX, node.x ?? 0);
     extent.maxX = Math.max(extent.maxX, (node.x ?? 0) + width);
     extent.minY = Math.min(extent.minY, node.y ?? 0);
     extents.set(file, extent);
   }
+  for (const file of [...placedOffsets.keys()]) if (!extents.has(file)) placedOffsets.delete(file);
   let right = -Infinity;
   for (const [file, extent] of extents) {
     const dx = placedOffsets.get(file);
     if (dx !== undefined) right = Math.max(right, extent.maxX + dx);
   }
+  for (const [file, extent] of extents) {
+    if (placedOffsets.has(file)) continue;
+    const dx = (right === -Infinity ? 0 : right + FILE_GAP) - extent.minX;
+    placedOffsets.set(file, dx);
+    right = extent.maxX + dx;
+  }
+  const ordered = [...extents].sort(([a, ea], [b, eb]) => ea.minX + placedOffsets.get(a)! - (eb.minX + placedOffsets.get(b)!));
+  let edge = -Infinity;
+  for (const [file, extent] of ordered) {
+    let dx = placedOffsets.get(file)!;
+    if (edge !== -Infinity && extent.minX + dx < edge + FILE_GAP) {
+      dx = edge + FILE_GAP - extent.minX;
+      placedOffsets.set(file, dx);
+    }
+    edge = Math.max(edge, extent.maxX + dx);
+  }
   const regions = new Map<string, FileRegion>();
   for (const [file, extent] of extents) {
-    let dx = placedOffsets.get(file);
-    if (dx === undefined) {
-      dx = (right === -Infinity ? 0 : right + FILE_GAP) - extent.minX;
-      placedOffsets.set(file, dx);
-      right = extent.maxX + dx;
-    }
+    const dx = placedOffsets.get(file)!;
     regions.set(file, { file, dx, left: extent.minX + dx, top: extent.minY });
   }
   return regions;

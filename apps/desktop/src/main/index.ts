@@ -1,13 +1,19 @@
+import { existsSync, mkdtempSync } from "node:fs";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from "electron";
-import { findProjectRoot, lucideIconNames } from "@lamsa/core";
-import type { NodeChange, OpenRequest, RecentProject, WelcomeState } from "../shared/api.js";
+import { checkFileCss, checkNodeCss, findProjectRoot, formatFileCss, formatNodeCss, lucideIconNames } from "@lamsa/core";
+import type { Change, CssScope, OpenRequest, RecentProject, WelcomeState } from "../shared/api.js";
 import { ProjectService } from "./project-service.js";
 import { openExternalTerminal, TerminalSession } from "./terminal.js";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
+
+app.setName("lamsa");
+// Tests and other hidden runs keep their own settings, so they never touch the user's recent projects.
+if (process.env.LAMSA_HIDDEN) app.setPath("userData", mkdtempSync(join(tmpdir(), "lamsa-user-data-")));
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "lamsa-asset", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -24,7 +30,7 @@ export function parseArgs(argv: string[]): OpenRequest {
     if (!value || value.startsWith("--")) continue;
     if (flag === "--root") request.root = resolve(value);
     else if (flag === "--file") request.file = value;
-    else request.select = value;
+    else request.select = [...(request.select ?? []), ...value.split(",").map((id) => id.trim()).filter(Boolean)];
   }
   if (!request.root && process.env.LAMSA_ROOT) request.root = resolve(process.env.LAMSA_ROOT);
   return request;
@@ -47,20 +53,28 @@ const terminal = new TerminalSession({
 });
 
 const recentFile = () => join(app.getPath("userData"), "recent.json");
+/** Where recent projects lived before the app was named "lamsa" (it used the package name). */
+const legacyRecentFile = () => join(app.getPath("appData"), "@lamsa", "desktop", "recent.json");
 
 async function readRecent(): Promise<RecentProject[]> {
+  const file = existsSync(recentFile()) || process.env.LAMSA_HIDDEN ? recentFile() : legacyRecentFile();
   try {
-    return JSON.parse(await readFile(recentFile(), "utf8")) as RecentProject[];
+    const recent = JSON.parse(await readFile(file, "utf8")) as RecentProject[];
+    return recent.filter((entry) => existsSync(entry.root));
   } catch {
     return [];
   }
 }
 
+async function writeRecent(recent: RecentProject[]) {
+  await mkdir(app.getPath("userData"), { recursive: true });
+  await writeFile(recentFile(), JSON.stringify(recent.slice(0, 10), null, 2));
+}
+
 async function rememberProject(root: string) {
   const recent = (await readRecent()).filter((entry) => entry.root !== root);
   recent.unshift({ root, name: basename(root), openedAt: new Date().toISOString() });
-  await mkdir(app.getPath("userData"), { recursive: true });
-  await writeFile(recentFile(), JSON.stringify(recent.slice(0, 10), null, 2));
+  await writeRecent(recent);
 }
 
 function createWindow() {
@@ -71,6 +85,7 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: "#ECEAE5",
     title: "lamsa",
+    icon: join(here, "../../resources/icons/512.png"),
     show: !process.env.LAMSA_HIDDEN,
     webPreferences: {
       preload: join(here, "../preload/index.mjs"),
@@ -89,6 +104,11 @@ function createWindow() {
 
 function registerIpc() {
   ipcMain.handle("welcome", async (): Promise<WelcomeState> => ({ recent: await readRecent(), uninitialised }));
+  ipcMain.handle("forget-recent", async (_event, root: string): Promise<WelcomeState> => {
+    const recent = (await readRecent()).filter((entry) => entry.root !== root);
+    await writeRecent(recent);
+    return { recent, uninitialised };
+  });
 
   ipcMain.handle("choose-folder", async () => {
     const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
@@ -105,11 +125,19 @@ function registerIpc() {
   ipcMain.handle("open-project", async (_event, requested: string) => {
     const root = findProjectRoot(requested);
     if (!root) throw new Error(`no lamsa.config.json in ${requested}`);
-    const snapshot = await service.open(root);
+    // The agent terminal runs in the old project's folder, so it ends with it.
+    terminal.stop();
+    const snapshot = await service.openProject(root);
     uninitialised = undefined;
     await rememberProject(root);
     window?.setTitle(`${snapshot.name} · lamsa`);
     return snapshot;
+  });
+
+  ipcMain.handle("close-project", async () => {
+    terminal.stop();
+    await service.close();
+    window?.setTitle("lamsa");
   });
 
   ipcMain.handle("current", async () => {
@@ -118,17 +146,32 @@ function registerIpc() {
     const root = request.root ? findProjectRoot(request.root) : undefined;
     if (request.root && !root) uninitialised = request.root;
     if (!root) return service.root ? service.snapshot() : null;
-    const snapshot = await service.open(root);
+    const snapshot = await service.openProject(root, { file: request.file });
     await rememberProject(root);
     window?.setTitle(`${snapshot.name} · lamsa`);
-    if (request.file || request.select) setTimeout(() => send("open-request", { file: request.file, select: request.select }), 50);
+    if (request.file || request.select?.length) setTimeout(() => send("open-request", { file: request.file, select: request.select }), 50);
     return snapshot;
   });
 
-  ipcMain.handle("apply-changes", (_event, changes: NodeChange[]) => service.applyChanges(changes));
+  ipcMain.handle("apply-changes", (_event, changes: Change[]) => service.applyChanges(changes));
   ipcMain.handle("icons", (_event, names: string[]) => service.icons(names));
+  ipcMain.handle("format-css", (_event, css: string, scope?: CssScope) => (scope === "file" ? formatFileCss(css) : formatNodeCss(css)));
+  ipcMain.handle("check-css", (_event, css: string, scope?: CssScope) => (scope === "file" ? checkFileCss(css) : checkNodeCss(css)));
   ipcMain.handle("icon-names", () => [...lucideIconNames()].sort());
   ipcMain.handle("set-selection", (_event, selection: string[], file?: string) => service.setSelection(selection, file));
+  ipcMain.handle("pick-design-files", async () => {
+    const root = service.root;
+    const result = await dialog.showOpenDialog({
+      title: "Add design files",
+      defaultPath: root ? (existsSync(join(root, "designs")) ? join(root, "designs") : root) : undefined,
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "lamsa design files", extensions: ["json"] }],
+    });
+    return result.canceled ? [] : result.filePaths;
+  });
+  ipcMain.handle("add-files", (_event, paths: string[]) => service.addFiles(paths));
+  ipcMain.handle("set-open-files", (_event, paths: string[]) => service.setOpenFiles(paths));
+  ipcMain.handle("close-file", (_event, path: string) => service.closeFile(path));
 
   ipcMain.handle("render", async (_event, ids: string[], mode?: "light" | "dark") => {
     const root = service.root;

@@ -4,7 +4,11 @@ import {
   buildChildIndex,
   childrenOf,
   deleteNodes,
+  checkFileCss,
+  checkNodeCss,
+  cssStateNames,
   formatDesignFile,
+  formatNodeCss,
   isDesignFile,
   loadProject,
   loadTokens,
@@ -171,3 +175,45 @@ describe("edits", () => {
     expect(removed.deleted.sort()).toEqual(["box", "c"]);
   });
 });
+
+describe("node css", () => {
+  it("formats like Prettier: one declaration per line, long lists split, token refs kept", () => {
+    expect(formatNodeCss("transition: translate 240ms ease-out, box-shadow 240ms ease-out;&:hover{box-shadow:{shadow.lg}}")).toBe(
+      "transition:\n  translate 240ms ease-out,\n  box-shadow 240ms ease-out;\n\n&:hover {\n  box-shadow: {shadow.lg};\n}",
+    );
+  });
+
+  it("reports syntax errors and nested @keyframes", () => {
+    expect(checkNodeCss("color: red; &:hover { color: blue")[0]?.message).toBe("Unclosed block");
+    expect(checkNodeCss("@keyframes x { from { opacity: 0 } }")[0]?.message).toContain("file's \"css\"");
+  });
+
+  it("accepts enter/exit transitions in node css and page-transition rules in file css", () => {
+    const modal = '&[data-state="closed"] { display: none; opacity: 0; }\ntransition: opacity 200ms, display 200ms allow-discrete;\n@starting-style { opacity: 0; scale: 0.95; }';
+    expect(checkNodeCss(modal)).toEqual([]);
+    expect(formatNodeCss(modal)).toContain("@starting-style {\n  opacity: 0;");
+    expect(cssStateNames(modal)).toEqual(["closed"]);
+    expect(checkFileCss("::view-transition-old(card) { animation: fade 200ms; }\n:active-view-transition-type(back)::view-transition-new(root) { animation-name: slide; }")).toEqual([]);
+    expect(checkFileCss(".card { color: red; }")[0]?.message).toContain("::view-transition-*");
+  });
+
+  it("validates keyframe names against file css and the app stylesheet", async () => {
+    const root = tempRepo({
+      "lamsa.config.json": config,
+      "app/globals.css": GLOBALS_CSS + "\n@keyframes app-pulse { 50% { opacity: 0.5; } }",
+      "designs/a.lamsa.json": {
+        version: 1,
+        css: "@keyframes fade-up { from { opacity: 0; } }",
+        nodes: {
+          ok: { type: "frame", css: "animation: fade-up 200ms ease-out, app-pulse 1s infinite;" },
+          typo: { type: "frame", css: "animation: fade-upp 200ms;" },
+        },
+      },
+    });
+    const loaded = await loadProject(root);
+    const issues = validateProject({ project: loaded, tokens: await loadTokens(root, loaded.config) });
+    expect(issues.filter((i) => i.code === "unknown-keyframes").map((i) => i.nodeId)).toEqual(["typo"]);
+    expect(issues.find((i) => i.code === "unknown-keyframes")?.fix).toContain("fade-up");
+  });
+});
+

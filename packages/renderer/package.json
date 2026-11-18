@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
-    "@lamsa/schema": "workspace:*"
+    "@lamsa/schema": "workspace:*",
+    "postcss": "^8.5.0"
   }
 }

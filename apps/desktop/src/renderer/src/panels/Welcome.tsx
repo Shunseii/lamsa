@@ -1,8 +1,32 @@
-import { BookOpen, Copy, FolderOpen, Sparkles, TriangleAlert } from "lucide-react";
+import { BookOpen, Check, Copy, FolderOpen, Sparkles, TriangleAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { WelcomeState } from "../../../shared/api";
 import { api, useEditor } from "../lib/store";
 import { LogoMark } from "./LogoMark";
+
+const INIT_COMMAND = "lamsa init --agent claude --yes";
+
+function CopyCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <div className="code-row">
+      <code className="mono">{command}</code>
+      <button
+        className="icon-btn tiny"
+        onClick={() => void navigator.clipboard.writeText(command).then(() => setCopied(true))}
+        aria-label={copied ? "Copied" : "Copy command"}
+        title={copied ? "Copied" : "Copy"}
+      >
+        {copied ? <Check size={14} /> : <Copy size={14} />}
+      </button>
+    </div>
+  );
+}
 
 export function Welcome() {
   const [state, setState] = useState<WelcomeState>({ recent: [] });
@@ -39,7 +63,7 @@ export function Welcome() {
           </a>
           <div className="welcome-cli">
             <span className="muted small">New repo? Set it up from your terminal, then open it here.</span>
-            <code className="mono">npx lamsa init --agent claude --yes</code>
+            <CopyCommand command={INIT_COMMAND} />
           </div>
         </div>
         <div className="welcome-recent">
@@ -52,14 +76,24 @@ export function Welcome() {
             </div>
           )}
           {state.recent.map((project) => (
-            <button key={project.root} className="list-row" onClick={() => void open(project.root)}>
-              <FolderOpen size={16} />
-              <span className="list-main">
-                <span>{project.name}</span>
-                <span className="muted mono small">{project.root}</span>
-              </span>
-              <span className="muted small">{new Date(project.openedAt).toLocaleDateString()}</span>
-            </button>
+            <div key={project.root} className="list-row recent-row">
+              <button className="recent-open" onClick={() => void open(project.root)} title={project.root}>
+                <FolderOpen size={16} />
+                <span className="list-main">
+                  <span>{project.name}</span>
+                  <span className="muted mono small">{project.root}</span>
+                </span>
+                <span className="muted small">{new Date(project.openedAt).toLocaleDateString()}</span>
+              </button>
+              <button
+                className="icon-btn tiny recent-remove"
+                onClick={() => void api().forgetRecent(project.root).then(setState)}
+                aria-label={`Remove ${project.name} from recent projects`}
+                title="Remove from recent projects"
+              >
+                <X size={14} />
+              </button>
+            </div>
           ))}
         </div>
       </div>
@@ -70,12 +104,7 @@ export function Welcome() {
               <TriangleAlert size={18} /> {state.uninitialised.split("/").pop()} isn't a lamsa project yet
             </div>
             <p className="muted">No lamsa.config.json found. Run this in the repo to create the config, install the agent skill, and add an AGENTS.md section:</p>
-            <div className="code-row">
-              <code className="mono">npx lamsa init --agent claude --yes</code>
-              <button className="icon-btn tiny" onClick={() => void navigator.clipboard.writeText("npx lamsa init --agent claude --yes")} aria-label="Copy command">
-                <Copy size={14} />
-              </button>
-            </div>
+            <CopyCommand command={INIT_COMMAND} />
             <div className="dialog-actions">
               <button className="btn" onClick={() => void choose()}>
                 Choose another folder

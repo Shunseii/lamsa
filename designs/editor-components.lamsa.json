@@ -4631,7 +4631,7 @@
       "type": "instance"
     },
     "tmGB6QLc": {
-      "content": "npx lamsa init --agent claude --yes",
+      "content": "lamsa init --agent claude --yes",
       "index": "a1",
       "parentId": "r2rmT1fB",
       "style": {

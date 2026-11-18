@@ -1,10 +1,13 @@
+import { useShallow } from "zustand/react/shallow";
 import {
   ChevronDown,
+  Clapperboard,
   Component,
   Frame,
   Hand,
   Image as ImageIcon,
   ImagePlay,
+  Keyboard,
   Moon,
   MousePointer2,
   PanelLeft,
@@ -17,13 +20,15 @@ import {
 } from "lucide-react";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { insertNodes, newId } from "../lib/edits";
-import { api, useEditor, type Tool } from "../lib/store";
+import { api, firstOpenFile, useEditor, type Tool } from "../lib/store";
 import { fitTo, zoomBy, zoomTo } from "../lib/viewport";
 import { shortcut } from "../lib/keys";
 import { LogoMark } from "./LogoMark";
+import { ProjectMenu } from "./ProjectMenu";
 import { IconPicker, useIconNames } from "./IconField";
 import { Popover } from "./Popover";
 import { cn } from "../lib/cn";
+import { runCommand } from "../lib/commands";
 
 export function Tip({ label, keys, hint, children }: { label: string; keys?: string; hint?: [string, string]; children: ReactNode }) {
   return (
@@ -63,7 +68,7 @@ export async function insertImage() {
   const id = newId(model);
   const parent = selection[0] && model.nodes[selection[0]]?.type === "frame" ? selection[0] : undefined;
   const node = { type: "image" as const, src: picked.src, alt: "", style: { width: 240, height: 160, "object-fit": "cover" } };
-  const file = model.fileOf.get(selection[0] ?? "") ?? Object.keys(files)[0] ?? "designs/main.lamsa.json";
+  const file = model.fileOf.get(selection[0] ?? "") ?? firstOpenFile(useEditor.getState()) ?? "designs/main.lamsa.json";
   const changes = parent
     ? insertNodes({ model, entries: [{ root: { id, node } }], parentId: parent })
     : insertNodes({ model, entries: [{ root: { id, node: { ...node, name: "Image", x: 0, y: 0 } } }], file });
@@ -78,7 +83,7 @@ export async function insertIcon(name: string) {
   const target = selection[0] ? model.nodes[selection[0]] : undefined;
   const parent = target?.type === "frame" ? selection[0] : target?.parentId;
   const node = { type: "icon" as const, set: "lucide" as const, icon: name, style: { width: 24, height: 24 } };
-  const file = model.fileOf.get(selection[0] ?? "") ?? Object.keys(files)[0] ?? "designs/main.lamsa.json";
+  const file = model.fileOf.get(selection[0] ?? "") ?? firstOpenFile(useEditor.getState()) ?? "designs/main.lamsa.json";
   const changes = parent
     ? insertNodes({ model, entries: [{ root: { id, node } }], parentId: parent })
     : insertNodes({ model, entries: [{ root: { id, node: { ...node, name: name, x: 0, y: 0 } } }], file });
@@ -87,12 +92,13 @@ export async function insertIcon(name: string) {
 }
 
 export function Toolbar() {
-  const { snapshot, tool, setTool, panels, togglePanel, canvasMode, setCanvasMode, viewport, selection, model, toast } = useEditor();
+  const { snapshot, tool, setTool, panels, togglePanel, canvasMode, setCanvasMode, viewport, selection, model, toast, previewOpen, closePreview, help, setHelp } = useEditor(
+    useShallow((s) => ({ snapshot: s.snapshot, tool: s.tool, setTool: s.setTool, panels: s.panels, togglePanel: s.togglePanel, canvasMode: s.canvasMode, setCanvasMode: s.setCanvasMode, viewport: s.viewport, selection: s.selection, model: s.model, toast: s.toast, previewOpen: s.preview !== null, closePreview: s.closePreview, help: s.help, setHelp: s.setHelp })),
+  );
   const [zoomOpen, setZoomOpen] = useState(false);
   const zoomButton = useRef<HTMLButtonElement>(null);
   const closeZoom = useCallback(() => setZoomOpen(false), []);
   const [rendering, setRendering] = useState(false);
-  const file = useEditor((s) => (s.selection[0] ? s.model.fileOf.get(s.selection[0]) : Object.keys(s.files)[0]));
 
   const [iconOpen, setIconOpen] = useState(false);
   const iconButton = useRef<HTMLButtonElement>(null);
@@ -141,11 +147,9 @@ export function Toolbar() {
     <div className="topbar">
       <div className="bar bar-project">
         <LogoMark />
-        <span className="project-name">{snapshot?.name}</span>
-        <span className="crumb-sep">›</span>
-        <span className="crumb mono">{file ?? "no files"}</span>
+        <ProjectMenu />
         <span className="bar-divider" />
-        <Tip label={panels.layers ? "Hide layers" : "Show layers"} keys={shortcut("mod+[")} hint={["Both sidebars", shortcut("mod+\\")]}>
+        <Tip label={panels.layers ? "Hide layers" : "Show layers"} keys={shortcut("mod+[")} hint={["Focus mode", shortcut("mod+\\")]}>
           <button className={cn("icon-btn", { "is-active": panels.layers })} onClick={() => togglePanel("layers")} aria-label="Toggle layers">
             <PanelLeft size={16} />
           </button>
@@ -215,14 +219,30 @@ export function Toolbar() {
             </Popover>
           )}
         </div>
+        <Tip label={previewOpen ? "Close animation preview" : selection.length ? "Preview animations" : "Select a layer to preview its animations"} keys="P">
+          <button
+            className={cn("icon-btn", { "is-active": previewOpen })}
+            onClick={() => (previewOpen ? closePreview() : void runCommand("preview-animations"))}
+            disabled={!previewOpen && selection.length === 0}
+            aria-label="Toggle animation preview"
+            data-testid="toggle-preview"
+          >
+            <Clapperboard size={16} />
+          </button>
+        </Tip>
         <Tip label={panels.terminal ? "Hide agent terminal" : "Show agent terminal"} keys={shortcut("mod+j")}>
           <button className={cn("icon-btn", { "is-active": panels.terminal })} onClick={() => togglePanel("terminal")} aria-label="Toggle terminal">
             <SquareTerminal size={16} />
           </button>
         </Tip>
-        <Tip label={panels.properties ? "Hide properties" : "Show properties"} keys={shortcut("mod+]")} hint={["Both sidebars", shortcut("mod+\\")]}>
+        <Tip label={panels.properties ? "Hide properties" : "Show properties"} keys={shortcut("mod+]")} hint={["Focus mode", shortcut("mod+\\")]}>
           <button className={cn("icon-btn", { "is-active": panels.properties })} onClick={() => togglePanel("properties")} aria-label="Toggle properties">
             <PanelRight size={16} />
+          </button>
+        </Tip>
+        <Tip label="Keyboard shortcuts" keys="?">
+          <button className={cn("icon-btn", { "is-active": help })} onClick={() => setHelp(!help)} aria-label="Keyboard shortcuts" data-testid="open-shortcuts">
+            <Keyboard size={16} />
           </button>
         </Tip>
         <button className="btn" onClick={() => void render()} disabled={rendering}>

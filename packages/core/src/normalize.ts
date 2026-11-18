@@ -1,4 +1,5 @@
 import { FORMAT_VERSION, SCHEMA_URL, type DesignFile, type DesignNode } from "@lamsa/schema";
+import { formatFileCss, formatNodeCss } from "./css.js";
 import { newId } from "./ids.js";
 import { keysBetween } from "./order.js";
 
@@ -126,6 +127,19 @@ export function formatDesignFile({
     changes.push(`assigned order index to ${ids.length} child(ren) of ${parent}`);
   }
 
+  let formattedCss = 0;
+  for (const node of Object.values(nodes)) {
+    if (typeof node.css !== "string") continue;
+    const formatted = formatNodeCss(node.css);
+    if (formatted !== node.css) {
+      formattedCss++;
+      node.css = formatted;
+    }
+  }
+  if (formattedCss > 0) changes.push(`formatted css on ${formattedCss} node(s)`);
+  const fileCss = typeof source.css === "string" ? formatFileCss(source.css) : undefined;
+  if (fileCss !== undefined && fileCss !== source.css) changes.push("formatted file css");
+
   if (fix) {
     const removed = removeOrphans(nodes);
     if (removed.length > 0) changes.push(`removed ${removed.length} orphaned node(s): ${removed.join(", ")}`);
@@ -135,6 +149,7 @@ export function formatDesignFile({
   const file = {
     $schema: typeof source.$schema === "string" ? source.$schema : SCHEMA_URL,
     version: typeof source.version === "number" ? source.version : FORMAT_VERSION,
+    ...(fileCss?.trim() ? { css: fileCss } : {}),
     nodes: nodes as Record<string, DesignNode>,
   } satisfies DesignFile;
   return { file, changes };

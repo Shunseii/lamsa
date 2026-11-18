@@ -15,9 +15,17 @@ export const styleValueSchema = z.union([z.string(), z.number()]);
  */
 export const styleSchema = z.record(z.string(), styleValueSchema);
 
+/**
+ * Plain CSS for one node: declarations plus nested rules where `&` is the node,
+ * e.g. `transition: scale 150ms; &:hover { scale: 1.02 }`. Token references like
+ * `{color.primary}` work here too.
+ */
+export const nodeCssSchema = z.string();
+
 export const nodePatchSchema = z
   .object({
     style: styleSchema.optional(),
+    css: nodeCssSchema.optional(),
     content: z.string().optional(),
     src: z.string().optional(),
     icon: z.string().optional(),
@@ -75,6 +83,7 @@ const baseNodeShape = {
   /** Locked in the editor: not selectable or movable on the canvas. Agents leave locked nodes alone unless asked. */
   locked: z.boolean().optional(),
   style: styleSchema.optional(),
+  css: nodeCssSchema.optional(),
 };
 
 export const frameNodeSchema = z
@@ -130,6 +139,8 @@ export const designFileSchema = z
   .object({
     $schema: z.string().optional(),
     version: z.number().int().positive(),
+    /** File-level CSS shared by every node in the file: `@keyframes` (and other at-rules) only. */
+    css: z.string().optional(),
     nodes: z.record(nodeIdSchema, nodeSchema),
   })
   .strict();
@@ -197,8 +208,10 @@ export interface TokenSet {
   adapter: string;
   source?: string;
   tokens: Record<string, Token>;
-  /** Variable definitions: a `:root` block and a `.dark` block. */
+  /** Variable definitions (a `:root` block and a `.dark` block), then the app's `@keyframes`. */
   css: string;
+  /** Names of the `@keyframes` in `css`, usable in `animation` without defining them in a design file. */
+  keyframes?: string[];
 }
 
 export const emptyTokenSet: TokenSet = { adapter: "none", tokens: {}, css: "" };

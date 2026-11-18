@@ -102,8 +102,20 @@ program
   .option("--out <dir>", "output directory (default .lamsa/render)")
   .option("--scale <n>", "device scale factor", (v) => Number.parseFloat(v), 2)
   .option("--mode <mode>", "force light or dark tokens")
+  .option("--animate [frames]", "capture the frame's motion as a strip of moments (default 6)", (v) => Number.parseInt(v, 10))
+  .option("--state <state>", "render with every node in a state: hover, press, focus, or a data-state value its css styles")
   .action((targets: string[], o) =>
-    run(() => renderCommand({ out: out(), targets, outDir: o.out, scale: o.scale, mode: o.mode })),
+    run(() =>
+      renderCommand({
+        out: out(),
+        targets,
+        outDir: o.out,
+        scale: o.scale,
+        mode: o.mode,
+        animate: o.animate === true ? 6 : o.animate,
+        state: o.state,
+      }),
+    ),
   );
 
 program
@@ -130,8 +142,8 @@ program
 program
   .command("open [file]")
   .description("show a design in the desktop editor (optional; nothing else needs it)")
-  .option("--select <id>", "node to select")
-  .action((file: string | undefined, o) => run(() => openCommand({ out: out(), file, select: o.select })));
+  .option("--select <ids>", "nodes to select: comma-separated IDs; repeatable", (value: string, previous: string[] = []) => [...previous, ...value.split(",")])
+  .action((file: string | undefined, o: { select?: string[] }) => run(() => openCommand({ out: out(), file, select: o.select })));
 
 program
   .command("migrate")

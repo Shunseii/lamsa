@@ -126,6 +126,19 @@ function spacingDisplay(base: string, step: number): string {
  * Reads a shadcn + Tailwind v4 stylesheet. With `defaults` (the text of `tailwindcss/theme.css`),
  * Tailwind's built-in scales (palette, text sizes, radii, shadows, …) become tokens too, marked `builtin`.
  */
+/** Every `@keyframes` block, by name; later sources win. */
+function keyframesOf(sources: (string | undefined)[]): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const css of sources) {
+    if (!css) continue;
+    postcss.parse(css).walkAtRules("keyframes", (rule) => {
+      const name = rule.params.trim();
+      if (name) found.set(name, rule.clone({ raws: { before: "", after: "\n" } }).toString());
+    });
+  }
+  return found;
+}
+
 export function parseShadcnTailwind4(css: string, options: { source?: string; defaults?: string } = {}): TokenSet {
   const { source, defaults } = options;
   const parsed = themeDeclsOf(css, source);
@@ -178,10 +191,12 @@ export function parseShadcnTailwind4(css: string, options: { source?: string; de
       ? ""
       : `${selector} {\n${decls.map((d) => `  ${d.name}: ${d.value};`).join("\n")}\n}\n`;
 
+  const keyframes = keyframesOf([defaults, css]);
   return {
     adapter: "shadcn-tailwind4",
     source,
     tokens,
-    css: block(":root", rootBlock) + block(".dark", darkDecls),
+    css: block(":root", rootBlock) + block(".dark", darkDecls) + [...keyframes.values()].join("\n"),
+    keyframes: [...keyframes.keys()].sort(),
   };
 }

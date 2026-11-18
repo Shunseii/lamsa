@@ -23,13 +23,21 @@ export async function renderCommand({
   outDir,
   scale,
   mode,
+  animate,
+  state,
 }: {
   out: Output;
   targets: string[];
   outDir?: string;
   scale: number;
   mode?: string;
+  animate?: number;
+  state?: string;
 }): Promise<number> {
+  if (animate !== undefined && (!Number.isInteger(animate) || animate < 2 || animate > 24)) {
+    throw new CliError("--animate takes a frame count from 2 to 24");
+  }
+  if (state !== undefined && !/^[\w-]+$/.test(state)) throw new CliError(`--state must be a single word, not "${state}"`);
   if (mode && mode !== "light" && mode !== "dark") throw new CliError(`--mode must be light or dark, not ${mode}`);
   if (!Number.isFinite(scale) || scale <= 0 || scale > 4) throw new CliError("--scale must be between 0 and 4");
   const workspace = await openWorkspace();
@@ -44,8 +52,11 @@ export async function renderCommand({
     outDir: dir,
     scale,
     mode: mode as TokenMode | undefined,
-    naming: (id) => `${[slug(nodes[id]?.name ?? ""), id].filter(Boolean).join("-")}${mode ? `.${mode}` : ""}.png`,
+    naming: (id) =>
+      `${[slug(nodes[id]?.name ?? ""), id].filter(Boolean).join("-")}${state ? `.${state}` : ""}${animate ? ".animate" : ""}${mode ? `.${mode}` : ""}.png`,
     log: (message) => process.stderr.write(message + "\n"),
+    animate,
+    state,
   });
   const root = workspace.project.root;
   const shown = frames.map((f) => ({ ...f, path: relative(root, f.path) || f.path }));
@@ -54,6 +65,7 @@ export async function renderCommand({
       .map(
         (f) =>
           `${f.path}  ${f.width}×${f.height} @${scale}x ${f.mode}` +
+          (f.times ? `\n  moments: ${f.times.map((t) => `${t}ms`).join(", ")}` : "") +
           (f.missingTokens.length ? `\n  missing tokens: ${f.missingTokens.join(", ")}` : "") +
           (f.missingIcons.length ? `\n  missing icons: ${f.missingIcons.join(", ")}` : ""),
       )

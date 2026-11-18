@@ -1,12 +1,13 @@
 import type { TokenMode } from "@lamsa/schema";
 import { create } from "zustand";
-import type {
-  ExternalChange,
-  FileState,
-  LamsaApi,
-  NodeChange,
-  ProjectIssue,
-  ProjectSnapshot,
+import {
+  isCssChange,
+  type Change,
+  type ExternalChange,
+  type FileState,
+  type LamsaApi,
+  type ProjectIssue,
+  type ProjectSnapshot,
 } from "../../../shared/api";
 import { buildModel, iconNamesIn, type Model } from "./model";
 
@@ -36,8 +37,8 @@ export interface Toast {
 
 interface HistoryEntry {
   label: string;
-  changes: NodeChange[];
-  inverse: NodeChange[];
+  changes: Change[];
+  inverse: Change[];
 }
 
 export interface EditorState {
@@ -66,12 +67,18 @@ export interface EditorState {
   picker: boolean;
   contextMenu: { x: number; y: number } | null;
   renderVersion: number;
+  /** Layers playing in the animation preview, in the order they were picked; null when it's closed. */
+  preview: string[] | null;
+  /** The keyboard shortcuts sheet. */
+  help: boolean;
+  /** Design files shown in the editor; null until the user picks them (the first-open prompt shows). */
+  openFiles: string[] | null;
 }
 
 interface EditorActions {
   loadSnapshot(snapshot: ProjectSnapshot): void;
   showWelcome(): void;
-  commit(label: string, changes: NodeChange[]): Promise<void>;
+  commit(label: string, changes: Change[]): Promise<void>;
   undo(): void;
   redo(): void;
   applyExternal(change: ExternalChange): void;
@@ -90,15 +97,30 @@ interface EditorActions {
   setPicker(open: boolean): void;
   setContextMenu(menu: { x: number; y: number } | null): void;
   ensureIcons(): void;
+  openPreview(ids: string[]): void;
+  closePreview(): void;
+  setHelp(open: boolean): void;
+  /** Loads files (absolute or repo-relative paths) into the session and shows them. */
+  addFiles(paths: string[]): Promise<void>;
+  setOpenFiles(paths: string[]): Promise<void>;
+  /** Opens another project in this window (folder picker when no root is given); false if nothing opened. */
+  switchProject(root?: string): Promise<boolean>;
+  /** Closes the project and shows the welcome screen. */
+  goHome(): Promise<void>;
+  closeFile(path: string): Promise<void>;
 }
 
 let toastId = 0;
 let selectionTimer: ReturnType<typeof setTimeout> | undefined;
 
-function applyToFiles(files: Record<string, FileState>, changes: NodeChange[]): Record<string, FileState> {
+function applyToFiles(files: Record<string, FileState>, changes: Change[]): Record<string, FileState> {
   const next = { ...files };
   for (const change of changes) {
     const file = next[change.file] ?? { path: change.file, nodes: {} };
+    if (isCssChange(change)) {
+      next[change.file] = { ...file, css: change.css.trim() ? change.css : undefined };
+      continue;
+    }
     const nodes = { ...file.nodes };
     if (change.node === null) delete nodes[change.id];
     else nodes[change.id] = change.node;
@@ -107,10 +129,17 @@ function applyToFiles(files: Record<string, FileState>, changes: NodeChange[]): 
   return next;
 }
 
-function inverseOf(files: Record<string, FileState>, changes: NodeChange[]): NodeChange[] {
+function inverseOf(files: Record<string, FileState>, changes: Change[]): Change[] {
   const seen = new Set<string>();
-  const inverse: NodeChange[] = [];
+  const inverse: Change[] = [];
   for (const change of changes) {
+    if (isCssChange(change)) {
+      const key = `${change.file}\u0000css`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      inverse.push({ file: change.file, css: files[change.file]?.css ?? "" });
+      continue;
+    }
     const key = `${change.file}\u0000${change.id}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -119,10 +148,19 @@ function inverseOf(files: Record<string, FileState>, changes: NodeChange[]): Nod
   return inverse.reverse();
 }
 
+/** Keeps the old object for every node the disk change didn't touch, so frames that don't show those nodes skip re-rendering. */
+function withUnchangedNodesKept({ previous, next, changedIds }: { previous: FileState | undefined; next: FileState; changedIds: string[] }): FileState {
+  if (!previous || next.error) return next;
+  const changed = new Set(changedIds);
+  const nodes: FileState["nodes"] = {};
+  for (const [id, node] of Object.entries(next.nodes)) nodes[id] = !changed.has(id) && previous.nodes[id] ? previous.nodes[id]! : node;
+  return { ...next, nodes };
+}
+
 const emptyModel = buildModel({});
 
 export const useEditor = create<EditorState & EditorActions>((set, get) => {
-  const send = async (changes: NodeChange[]) => {
+  const send = async (changes: Change[]) => {
     set((s) => ({ pending: s.pending + 1 }));
     try {
       const result = await api().applyChanges(changes);
@@ -157,13 +195,17 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
     picker: false,
     contextMenu: null,
     renderVersion: 0,
+    preview: null,
+    help: false,
+    openFiles: null,
 
     loadSnapshot(snapshot) {
-      const model = buildModel(snapshot.files);
+      const model = buildModel(snapshot.files, snapshot.open);
       set({
         screen: "editor",
         snapshot,
         files: snapshot.files,
+        openFiles: snapshot.open,
         model,
         issues: snapshot.issues,
         selection: get().selection.filter((id) => model.nodes[id]),
@@ -175,7 +217,31 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
     },
 
     showWelcome() {
-      set({ screen: "welcome", snapshot: null, files: {}, model: emptyModel });
+      set({ screen: "welcome", snapshot: null, files: {}, model: emptyModel, openFiles: null });
+    },
+
+    async switchProject(root) {
+      let target = root;
+      if (!target) {
+        const picked = await api().chooseFolder();
+        // A folder without lamsa.config.json: the welcome screen explains how to set it up.
+        if (picked.uninitialised) {
+          await get().goHome();
+          return false;
+        }
+        target = picked.root;
+      }
+      if (!target) return false;
+      const snapshot = await api().openProject(target);
+      set((s) => ({ selection: [], hover: null, preview: null, picker: false, contextMenu: null, panels: { ...s.panels, terminal: false } }));
+      get().loadSnapshot(snapshot);
+      return true;
+    },
+
+    async goHome() {
+      await api().closeProject();
+      set((s) => ({ selection: [], hover: null, preview: null, picker: false, contextMenu: null, undoStack: [], redoStack: [], panels: { ...s.panels, terminal: false } }));
+      get().showWelcome();
     },
 
     async commit(label, changes) {
@@ -185,7 +251,7 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
       const next = applyToFiles(files, changes);
       set((s) => ({
         files: next,
-        model: buildModel(next),
+        model: buildModel(next, s.openFiles),
         undoStack: [...s.undoStack.slice(-199), { label, changes, inverse }],
         redoStack: [],
       }));
@@ -210,7 +276,7 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
       const next = applyToFiles(get().files, entry.inverse);
       set((s) => ({
         files: next,
-        model: buildModel(next),
+        model: buildModel(next, s.openFiles),
         undoStack: s.undoStack.slice(0, -1),
         redoStack: [...s.redoStack, entry],
       }));
@@ -223,7 +289,7 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
       const next = applyToFiles(get().files, entry.changes);
       set((s) => ({
         files: next,
-        model: buildModel(next),
+        model: buildModel(next, s.openFiles),
         redoStack: s.redoStack.slice(0, -1),
         undoStack: [...s.undoStack, entry],
       }));
@@ -231,19 +297,23 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
     },
 
     applyExternal(change) {
-      const files = { ...get().files, [change.path]: change.file };
+      const files = { ...get().files, [change.path]: withUnchangedNodesKept({ previous: get().files[change.path], next: change.file, changedIds: change.changedIds }) };
       if (change.file.error === "deleted") delete files[change.path];
-      const model = buildModel(files);
+      const openFiles = change.open ?? get().openFiles;
+      const model = buildModel(files, openFiles);
       const touched = new Set(change.changedIds);
-      const keep = (entry: HistoryEntry) => !entry.changes.some((c) => touched.has(c.id));
+      const cssChanged = (get().files[change.path]?.css ?? "") !== (change.file.css ?? "");
+      const keep = (entry: HistoryEntry) => !entry.changes.some((c) => (isCssChange(c) ? cssChanged && c.file === change.path : touched.has(c.id)));
       const now = Date.now();
       const flash = { ...get().flash };
       for (const id of change.changedIds) if (model.nodes[id]) flash[id] = now + 1600;
       set((s) => ({
         files,
         model,
+        openFiles,
         issues: change.issues,
         selection: s.selection.filter((id) => model.nodes[id]),
+        preview: s.preview && s.preview.some((id) => model.nodes[id]) ? s.preview.filter((id) => model.nodes[id]) : null,
         undoStack: s.undoStack.filter(keep),
         redoStack: s.redoStack.filter(keep),
         flash,
@@ -310,6 +380,36 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
     setEditingText: (editingText) => set({ editingText }),
     setPicker: (picker) => set({ picker, tool: picker ? "component" : get().tool === "component" ? "select" : get().tool }),
     setContextMenu: (contextMenu) => set({ contextMenu }),
+    openPreview: (ids) => set({ preview: ids.length ? ids : null }),
+    closePreview: () => set({ preview: null }),
+    setHelp: (help) => set({ help }),
+
+    async addFiles(paths) {
+      if (!paths.length) return;
+      const result = await api().addFiles(paths);
+      const files = { ...get().files };
+      for (const file of result.files) files[file.path] = file;
+      const model = buildModel(files, result.open);
+      set({ files, openFiles: result.open, model, issues: result.issues, renderVersion: get().renderVersion + 1 });
+      get().ensureIcons();
+      if (result.errors.length) get().toast({ tone: "warn", title: `Couldn't add ${result.errors.length === 1 ? "a file" : `${result.errors.length} files`}`, message: result.errors.join("\n") });
+    },
+
+    async setOpenFiles(paths) {
+      const openFiles = await api().setOpenFiles(paths);
+      set({ openFiles, model: buildModel(get().files, openFiles) });
+    },
+
+    async closeFile(path) {
+      const openFiles = await api().closeFile(path);
+      const model = buildModel(get().files, openFiles);
+      set((s) => ({
+        openFiles,
+        model,
+        selection: s.selection.filter((id) => model.fileOf.get(id) !== path),
+        preview: s.preview && s.preview.some((id) => model.fileOf.get(id) !== path) ? s.preview.filter((id) => model.fileOf.get(id) !== path) : null,
+      }));
+    },
 
     ensureIcons() {
       const missing = iconNamesIn(get().model.nodes).filter((name) => !(name in get().icons));
@@ -324,3 +424,8 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
     },
   };
 });
+
+/** Where new top-level frames go when nothing selected says otherwise: the first open file. */
+export function firstOpenFile(state: Pick<EditorState, "openFiles" | "files">): string | undefined {
+  return state.openFiles?.[0] ?? Object.keys(state.files)[0];
+}

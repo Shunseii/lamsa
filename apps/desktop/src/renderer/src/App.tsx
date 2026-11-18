@@ -1,14 +1,21 @@
+import { useShallow } from "zustand/react/shallow";
 import { TriangleAlert } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Canvas } from "./canvas/Canvas";
 import { installShortcuts } from "./lib/commands";
 import { api, useEditor } from "./lib/store";
 import { fitTo } from "./lib/viewport";
+import { baseId } from "./lib/model";
+import type { OpenRequest } from "../../shared/api";
 import { ComponentPicker } from "./panels/ComponentPicker";
 import { ContextMenu } from "./panels/ContextMenu";
+import { localFontCss } from "./canvas/FrameView";
 import { LayersPanel } from "./panels/LayersPanel";
 import { LogoMark } from "./panels/LogoMark";
+import { PreviewPanel } from "./panels/PreviewPanel";
 import { PropertiesPanel } from "./panels/PropertiesPanel";
+import { OpenFilesDialog } from "./panels/OpenFilesDialog";
+import { ShortcutsHelp } from "./panels/ShortcutsHelp";
 import { StatusBar } from "./panels/StatusBar";
 import { TerminalPanel } from "./panels/TerminalPanel";
 import { Toasts } from "./panels/Toasts";
@@ -30,7 +37,7 @@ function useFonts() {
     }
     if (snapshot.fontCss) {
       const style = document.createElement("style");
-      style.textContent = snapshot.fontCss.replace(/url\("(?!https?:|data:)([^"]+)"\)/g, (_m, path: string) => `url("lamsa-asset://local/${path}")`);
+      style.textContent = localFontCss(snapshot.fontCss);
       document.head.appendChild(style);
       added.push(style);
     }
@@ -39,19 +46,25 @@ function useFonts() {
   }, [snapshot]);
 }
 
-function handleOpenRequest(request: { file?: string; select?: string }) {
+async function handleOpenRequest(request: OpenRequest) {
+  const before = useEditor.getState();
+  const toSelect = [...new Set((request.select ?? []).map(baseId))].filter((id) => before.model.nodes[id]);
+  // A file asked for by name, or holding a node to select, opens first if it isn't already.
+  const wanted = [...new Set([request.file, ...toSelect.map((id) => before.model.fileOf.get(id))])].filter(
+    (path): path is string => !!path && !(before.openFiles ?? []).includes(path),
+  );
+  if (wanted.length) await before.addFiles(wanted);
   const state = useEditor.getState();
   const { model } = state;
-  if (request.select && model.nodes[request.select.split("/")[0]!]) {
-    state.select([request.select.split("/")[0]!]);
-  } else if (request.file) {
-    state.select(model.roots.filter((id) => model.fileOf.get(id) === request.file));
-  }
-  setTimeout(() => fitTo(state.selection.length || request.select || request.file ? "selection" : "all"), 80);
+  const selection = toSelect.length ? toSelect : request.file ? model.roots.filter((id) => model.fileOf.get(id) === request.file) : [];
+  if (selection.length) state.select(selection);
+  setTimeout(() => fitTo(selection.length ? "selection" : "all"), 80);
 }
 
 export function App() {
-  const { screen, panels, picker, files } = useEditor();
+  const { screen, panels, picker, files, help, choosingFiles } = useEditor(
+    useShallow((s) => ({ screen: s.screen, panels: s.panels, picker: s.picker, files: s.files, help: s.help, choosingFiles: s.openFiles === null })),
+  );
   useFonts();
 
   useEffect(() => {
@@ -65,7 +78,7 @@ export function App() {
       });
     const offs = [
       api().onExternalChange((change) => useEditor.getState().applyExternal(change)),
-      api().onOpenRequest((request) => handleOpenRequest(request)),
+      api().onOpenRequest((request) => void handleOpenRequest(request)),
       api().onProjectReloaded((snapshot) => {
         useEditor.getState().loadSnapshot(snapshot);
         useEditor.getState().toast({ tone: "neutral", title: "Tokens or config changed", message: "Reloaded from disk" });
@@ -102,14 +115,48 @@ export function App() {
           </div>
         </div>
       )}
-      {panels.layers && <LayersPanel />}
-      {panels.properties && <PropertiesPanel />}
-      {panels.terminal && <TerminalPanel />}
+      <Presence open={panels.layers}>
+        <LayersPanel />
+      </Presence>
+      <Presence open={panels.properties}>
+        <PropertiesPanel />
+      </Presence>
+      <Presence open={panels.terminal}>
+        <TerminalPanel />
+      </Presence>
+      <PreviewPanel />
       <StatusBar />
       <ContextMenu />
       {picker && <ComponentPicker />}
       <Toasts />
+      <Presence open={help}>
+        <ShortcutsHelp />
+      </Presence>
+      <Presence open={choosingFiles}>
+        <OpenFilesDialog />
+      </Presence>
     </div>
   );
 }
 
+/** How long a closing panel or dialog stays mounted so its exit transition (styles.css) can play. */
+const PANEL_EXIT_MS = 140;
+
+/** Keeps a panel or dialog mounted for its exit transition; `data-state` drives the CSS. */
+function Presence({ open, children }: { open: boolean; children: ReactNode }) {
+  const [mounted, setMounted] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      return;
+    }
+    const timer = setTimeout(() => setMounted(false), PANEL_EXIT_MS);
+    return () => clearTimeout(timer);
+  }, [open]);
+  if (!open && !mounted) return null;
+  return (
+    <div className="presence" data-state={open ? "open" : "closed"}>
+      {children}
+    </div>
+  );
+}

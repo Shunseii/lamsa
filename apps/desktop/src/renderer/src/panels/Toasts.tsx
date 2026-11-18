@@ -1,10 +1,13 @@
+import { useShallow } from "zustand/react/shallow";
 import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react";
 import { useEditor } from "../lib/store";
 
 const ICONS = { neutral: Info, ok: CircleCheck, warn: TriangleAlert, danger: CircleAlert };
 
 export function Toasts() {
-  const { toasts, dismissToast } = useEditor();
+  const { toasts, dismissToast } = useEditor(
+    useShallow((s) => ({ toasts: s.toasts, dismissToast: s.dismissToast })),
+  );
   return (
     <div className="toasts" data-testid="toasts">
       {toasts.map((toast) => {

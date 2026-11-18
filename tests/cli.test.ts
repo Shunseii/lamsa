@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -8,7 +8,11 @@ import { GLOBALS_CSS, tempRepo } from "./helpers.js";
 const CLI = fileURLToPath(new URL("../packages/cli/dist/cli.js", import.meta.url));
 
 function lamsa(cwd: string, ...args: string[]) {
-  const result = spawnSync(process.execPath, [CLI, "--json", ...args], { cwd, encoding: "utf8" });
+  return lamsaWith({ cwd, args });
+}
+
+function lamsaWith({ cwd, args, env }: { cwd: string; args: string[]; env?: NodeJS.ProcessEnv }) {
+  const result = spawnSync(process.execPath, [CLI, "--json", ...args], { cwd, encoding: "utf8", env: { ...process.env, ...env } });
   return { code: result.status, json: JSON.parse(result.stdout || "{}") as Record<string, unknown> };
 }
 
@@ -42,7 +46,36 @@ describe("lamsa CLI (agent loop, no editor)", () => {
     const frame = (rendered.json.frames as { path: string; width: number; id: string }[])[0]!;
     expect(frame).toMatchObject({ id: rootId, width: 200 });
     expect(readFileSync(join(root, frame.path)).subarray(1, 4).toString()).toBe("PNG");
-  });
+
+    // Motion: an entrance animation renders as a strip of moments, and a state can be forced.
+    const motion = lamsa(
+      root,
+      "add",
+      "--file",
+      "designs/home.lamsa.json",
+      "--tree",
+      JSON.stringify({
+        type: "frame",
+        name: "Card",
+        x: 400,
+        style: { width: 120, height: 60, background: "{color.primary}" },
+        css: "animation: fade 300ms ease-out both;\n&:hover { opacity: 0.5; }",
+      }),
+    );
+    expect(motion.code).toBe(0);
+    expect(lamsa(root, "validate").json).toMatchObject({ warnings: 1 });
+    const designPath = join(root, "designs/home.lamsa.json");
+    const design = JSON.parse(readFileSync(designPath, "utf8"));
+    design.css = "@keyframes fade { from { opacity: 0; } }";
+    writeFileSync(designPath, JSON.stringify(design));
+    expect(lamsa(root, "validate").json).toMatchObject({ errors: 0, warnings: 0 });
+    const strip = lamsa(root, "render", "Card", "--scale", "1", "--animate", "4");
+    expect(strip.code).toBe(0);
+    const stripFrame = (strip.json.frames as { path: string; times?: number[] }[])[0]!;
+    expect(stripFrame.path).toContain(".animate.png");
+    expect(stripFrame.times).toEqual([0, 100, 200, 300]);
+    expect(lamsa(root, "render", "Card", "--scale", "1", "--state", "hover").code).toBe(0);
+  }, 60_000);
 
   it("exits non-zero with a fix when input is invalid", () => {
     const root = tempRepo({ "app/globals.css": GLOBALS_CSS });
@@ -51,5 +84,26 @@ describe("lamsa CLI (agent loop, no editor)", () => {
     expect(bad.code).toBe(1);
     expect(JSON.stringify(bad.json)).toContain("house");
     expect(existsSync(join(root, "designs/x.lamsa.json"))).toBe(false);
+  });
+
+  it("opens the editor with several layers selected, and refuses IDs that don't exist", async () => {
+    const root = tempRepo({ "app/globals.css": GLOBALS_CSS });
+    lamsa(root, "init", "--yes");
+    const added = lamsa(root, "add", "--file", "designs/a.lamsa.json", "--tree", JSON.stringify({ type: "frame", name: "A", children: [{ type: "text", content: "Hi" }] }));
+    const [frameId] = added.json.rootIds as string[];
+    const textId = (lamsa(root, "tree").json.nodes as { id: string; type: string }[]).find((node) => node.type === "text")!.id;
+    const argsFile = join(root, "desktop-args.txt");
+    const fakeDesktop = join(root, "fake-desktop.sh");
+    writeFileSync(fakeDesktop, `#!/bin/sh\necho "$@" > "${argsFile}"\n`, { mode: 0o755 });
+    const env = { LAMSA_DESKTOP_BIN: fakeDesktop };
+
+    const opened = lamsaWith({ cwd: root, args: ["open", "--select", `${frameId},${textId}`, "--select", frameId!], env });
+    expect(opened.code).toBe(0);
+    expect(opened.json.select).toEqual([frameId, textId]);
+    await expect.poll(() => (existsSync(argsFile) ? readFileSync(argsFile, "utf8") : "")).toContain(`--select=${frameId},${textId}`);
+
+    const missing = lamsaWith({ cwd: root, args: ["open", "--select", `${frameId},nope1234`], env });
+    expect(missing.code).not.toBe(0);
+    expect(JSON.stringify(missing.json)).toContain("nope1234");
   });
 });

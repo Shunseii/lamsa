@@ -1,9 +1,10 @@
+import { useShallow } from "zustand/react/shallow";
 import type { DesignNode } from "@lamsa/schema";
 import { Component, CornerDownLeft, EyeOff, Search } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { insertNodes, newId } from "../lib/edits";
 import { isComponent, nodeTitle } from "../lib/model";
-import { useEditor } from "../lib/store";
+import { firstOpenFile, useEditor } from "../lib/store";
 import { cn } from "../lib/cn";
 import { useDismiss } from "./Popover";
 
@@ -13,7 +14,7 @@ export async function insertInstance(componentId: string, props: Record<string, 
   const target = selection[0];
   const parent = target && model.nodes[target]?.type === "frame" && !isComponent(model.nodes[target]) ? target : model.nodes[target ?? ""]?.parentId;
   const node: DesignNode = { type: "instance", componentId, ...(Object.keys(props).length ? { props } : {}) };
-  const file = model.fileOf.get(target ?? "") ?? Object.keys(files)[0] ?? "designs/main.lamsa.json";
+  const file = model.fileOf.get(target ?? "") ?? firstOpenFile(useEditor.getState()) ?? "designs/main.lamsa.json";
   const changes = parent
     ? insertNodes({ model, entries: [{ root: { id, node } }], parentId: parent })
     : insertNodes({ model, entries: [{ root: { id, node: { ...node, x: 0, y: 0 } as DesignNode } }], file });
@@ -22,7 +23,9 @@ export async function insertInstance(componentId: string, props: Record<string, 
 }
 
 export function ComponentPicker() {
-  const { model, setPicker, selection } = useEditor();
+  const { model, setPicker, selection } = useEditor(
+    useShallow((s) => ({ model: s.model, setPicker: s.setPicker, selection: s.selection })),
+  );
   const [query, setQuery] = useState("");
   const all = Object.entries(model.nodes).filter(([, n]) => isComponent(n));
   const hidden = all.filter(([, n]) => n.type === "frame" && n.component?.internal).length;

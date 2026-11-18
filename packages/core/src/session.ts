@@ -10,6 +10,11 @@ export interface Session {
   selection: string[];
   /** Repo-relative path of the file in focus. */
   file?: string;
+  /**
+   * Design files open in the desktop editor, relative to the repo root (`../` for files outside it).
+   * Missing until the user first picks them.
+   */
+  open?: string[];
   updatedAt: string;
 }
 

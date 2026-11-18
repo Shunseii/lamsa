@@ -6,17 +6,27 @@
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
+  "productName": "lamsa",
+  "desktopName": "lamsa.desktop",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "rebuild": "electron-rebuild -f -w node-pty",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "install:app": "sh scripts/install.sh"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.4",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
     "@lamsa/core": "workspace:*",
     "@lamsa/renderer": "workspace:*",
     "@lamsa/schema": "workspace:*",
+    "@lezer/highlight": "^1.2.5",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "chokidar": "^4.0.3",

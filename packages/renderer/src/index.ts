@@ -1,3 +1,5 @@
+export * from "./motion.js";
+export * from "./transitions.js";
 import {
   resolveTokenRefs,
   type DesignNode,
@@ -34,10 +36,14 @@ export interface RenderOptions {
   assetUrl?: (src: string) => string;
   /** When the root is a main component, render it with these prop values instead of its defaults. */
   componentProps?: Record<string, string | boolean>;
+  /** File-level CSS (`@keyframes` and other at-rules) from the design files. */
+  fileCss?: string;
 }
 
 export interface RenderResult {
   root: RenderElement;
+  /** Stylesheet for this render: file-level CSS plus one rule per node with its own `css`. */
+  css: string;
   mode: TokenMode;
   missingTokens: string[];
   missingIcons: string[];
@@ -77,9 +83,15 @@ interface Context {
   missingIcons: Set<string>;
   children: Map<string, string[]>;
   depth: number;
+  rules: string[];
 }
 
+/** Rendering every top-level frame of one node map reuses one index instead of rebuilding it per frame. */
+const childMaps = new WeakMap<Record<string, DesignNode>, Map<string, string[]>>();
+
 function childMap(nodes: Record<string, DesignNode>): Map<string, string[]> {
+  const cached = childMaps.get(nodes);
+  if (cached) return cached;
   const map = new Map<string, string[]>();
   for (const [id, node] of Object.entries(nodes)) {
     if (node.parentId === undefined) continue;
@@ -94,6 +106,7 @@ function childMap(nodes: Record<string, DesignNode>): Map<string, string[]> {
       return ia < ib ? -1 : ia > ib ? 1 : a < b ? -1 : a > b ? 1 : 0;
     });
   }
+  childMaps.set(nodes, map);
   return map;
 }
 
@@ -115,11 +128,66 @@ function resolveStyle(style: Style | undefined, context: Context): Record<string
   return result;
 }
 
+const joinCss = (...parts: (string | undefined)[]): string | undefined => {
+  const kept = parts.filter((part): part is string => !!part && part.trim().length > 0);
+  return kept.length ? kept.join("\n") : undefined;
+};
+
 function mergePatch(into: Map<string, NodePatch>, patches: Record<string, NodePatch> | undefined) {
   for (const [id, patch] of Object.entries(patches ?? {})) {
     const current = into.get(id) ?? {};
-    into.set(id, { ...current, ...patch, style: { ...current.style, ...patch.style } });
+    into.set(id, { ...current, ...patch, style: { ...current.style, ...patch.style }, css: joinCss(current.css, patch.css) });
   }
+}
+
+/**
+ * A node with its own `css` gets one rule: its `style` first, then its CSS. Inline styles would
+ * beat every rule, so the style moves out of the element; `&:hover { … }` and friends can then
+ * override style values by normal specificity.
+ */
+function withNodeCss(element: RenderElement, css: string | undefined, context: Context): RenderElement {
+  if (!css?.trim() || element.style.display === "none") return element;
+  const { css: resolved, missing } = resolveTokenRefs(css, context.options.tokens.tokens);
+  for (const path of missing) context.missingTokens.add(path);
+  const declarations = Object.entries(element.style).map(([property, value]) => `${property}: ${value};`);
+  context.rules.push(`[data-node-id="${element.nodeId.replace(/"/g, '\\"')}"] {\n${[...declarations, resolved].join("\n")}\n}`);
+  return { ...element, style: {} };
+}
+
+/** `data-state` values a node's CSS styles on itself, e.g. `&[data-state="open"]` gives `open`. */
+export function cssStates(css: string | undefined): string[] {
+  if (!css) return [];
+  return [...new Set([...css.matchAll(/&\[data-state\s*=\s*["']?([\w-]+)["']?\s*\]/g)].map((m) => m[1]!))];
+}
+
+/** Marks elements whose CSS styles `data-state` values, so previews and renders can set them. */
+function stateAttrs(css: string | undefined): Record<string, string> {
+  const states = cssStates(css);
+  return states.length ? { "data-lamsa-states": states.join(" ") } : {};
+}
+
+const FORCEABLE = /:(hover|active|focus-visible|focus)(?![-\w])/g;
+const FORCE_ATTR: Record<string, string> = { hover: "hover", active: "active", "focus-visible": "focus", focus: "focus" };
+
+/**
+ * Lets a preview put elements into a state without the pointer: `:hover` also matches
+ * `[data-force-hover]`, `:active` `[data-force-active]`, `:focus`/`:focus-visible` `[data-force-focus]`.
+ */
+export function withForcedStates(css: string): string {
+  return css.replace(FORCEABLE, (_, state: string) => `:is(:${state}, [data-force-${FORCE_ATTR[state]}])`);
+}
+
+/** For a still view like the editor canvas: the pointer no longer triggers `:hover`/`:active`/`:focus` rules. */
+export function withoutPointerStates(css: string): string {
+  return css.replace(/:is\(:(?:hover|active|focus-visible|focus), (\[data-force-\w+\])\)/g, "$1");
+}
+
+/** Makes `prefers-reduced-motion` queries behave as if the user asked for reduced motion. */
+export function emulateReducedMotion(css: string): string {
+  return css
+    .replace(/\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)/g, "(min-width: 0px)")
+    .replace(/\(\s*prefers-reduced-motion\s*:\s*no-preference\s*\)/g, "(max-width: -1px)")
+    .replace(/\(\s*prefers-reduced-motion\s*\)/g, "(min-width: 0px)");
 }
 
 export function instancePatches(instance: InstanceNode, component: DesignNode): Map<string, NodePatch> {
@@ -145,6 +213,8 @@ export function instancePatches(instance: InstanceNode, component: DesignNode): 
 export function applyPatch(node: DesignNode, patch: NodePatch | undefined): DesignNode {
   if (!patch) return node;
   const next = { ...node, style: { ...node.style, ...patch.style } } as DesignNode;
+  const css = joinCss(node.css, patch.css);
+  if (css !== undefined) next.css = css;
   if (patch.hidden !== undefined) next.hidden = patch.hidden;
   if (patch.content !== undefined && next.type === "text") next.content = patch.content;
   if (patch.src !== undefined && next.type === "image") next.src = patch.src;
@@ -170,7 +240,7 @@ function renderNode({
   const { nodes } = context.options;
   const style = resolveStyle(node.style, context);
   if (node.hidden) style.display = "none";
-  const base = { nodeId: displayId, nodeType: node.type, attrs: { "data-node-id": displayId } };
+  const base = { nodeId: displayId, nodeType: node.type, attrs: { "data-node-id": displayId, ...stateAttrs(node.css) } };
 
   if (isRoot) {
     style.position ??= "relative";
@@ -187,6 +257,7 @@ function renderNode({
     const merged: DesignNode = {
       ...applyPatch(component, rootPatch),
       style: { ...component.style, ...rootPatch?.style, ...node.style },
+      css: joinCss(component.css, rootPatch?.css, node.css),
       hidden: node.hidden ?? component.hidden,
     } as DesignNode;
     context.depth++;
@@ -210,12 +281,12 @@ function renderNode({
 
   if (node.type === "text") {
     style["white-space"] ??= "pre-wrap";
-    return { ...base, tag: "div", style, children: [], text: node.content };
+    return withNodeCss({ ...base, tag: "div", style, children: [], text: node.content }, node.css, context);
   }
 
   if (node.type === "image") {
     const src = context.options.assetUrl ? context.options.assetUrl(node.src) : node.src;
-    return { ...base, tag: "img", style, attrs: { ...base.attrs, src, alt: node.alt ?? "" }, children: [] };
+    return withNodeCss({ ...base, tag: "img", style, attrs: { ...base.attrs, src, alt: node.alt ?? "" }, children: [] }, node.css, context);
   }
 
   const svg = context.options.iconSvg(node.icon);
@@ -223,14 +294,18 @@ function renderNode({
   style.width ??= `${ICON_DEFAULT_SIZE}px`;
   style.height ??= `${ICON_DEFAULT_SIZE}px`;
   style["flex-shrink"] ??= "0";
-  return {
-    ...base,
-    tag: "div",
-    className: "lamsa-icon",
-    style,
-    children: [],
-    html: svg ?? "",
-  };
+  return withNodeCss(
+    {
+      ...base,
+      tag: "div",
+      className: "lamsa-icon",
+      style,
+      children: [],
+      html: svg ?? "",
+    },
+    node.css,
+    context,
+  );
 }
 
 function renderFrameLike({
@@ -281,15 +356,19 @@ function renderFrameLike({
     }
     return renderNode({ id: childId, displayId: childDisplayId, node: patched, context, patches, isRoot: false });
   });
-  return {
-    tag: "div",
-    nodeId: displayId,
-    nodeType,
-    className: mode,
-    style,
-    attrs: { "data-node-id": displayId },
-    children,
-  };
+  return withNodeCss(
+    {
+      tag: "div",
+      nodeId: displayId,
+      nodeType,
+      className: mode,
+      style,
+      attrs: { "data-node-id": displayId, ...stateAttrs(node.css) },
+      children,
+    },
+    node.css,
+    context,
+  );
 }
 
 export function buildRenderTree(options: RenderOptions): RenderResult {
@@ -301,6 +380,7 @@ export function buildRenderTree(options: RenderOptions): RenderResult {
     missingIcons: new Set(),
     children: childMap(options.nodes),
     depth: 0,
+    rules: [],
   };
   let root: RenderElement;
   if (node.type === "frame" && node.component) {
@@ -322,8 +402,10 @@ export function buildRenderTree(options: RenderOptions): RenderResult {
   const frameMode = node.type === "frame" ? node.mode : undefined;
   const mode = options.mode ?? frameMode ?? options.canvasMode ?? "light";
   if (options.mode) root.className = options.mode;
+  const css = withForcedStates([options.fileCss ?? "", ...context.rules].filter((part) => part.trim()).join("\n"));
   return {
     root,
+    css,
     mode,
     missingTokens: [...context.missingTokens],
     missingIcons: [...context.missingIcons],
@@ -393,6 +475,7 @@ ${baseCss(tokens)}
 ${tokens.css}
 ${fontCss}
 html, body { background: transparent; }
+${result.css}
 </style>
 </head>
 <body>
