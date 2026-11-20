@@ -1,5 +1,5 @@
 import type { DesignNode } from "@lamsa/schema";
-import { Play } from "lucide-react";
+import { FileJson, Play } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { insertNodes, newId, reparentMany, setStyle } from "../lib/edits";
@@ -32,6 +32,33 @@ type Drag =
 
 /** Frames narrower than this on screen don't get the label's preview button; it would crowd the name. */
 const PLAY_MIN_WIDTH = 140;
+/** Below this on-screen width a frame's label hides (unless selected or hovered); it couldn't show a readable name. */
+const LABEL_MIN_WIDTH = 40;
+/** On-screen height a label needs above its frame; with less room it would cover the frame above. */
+const LABEL_HEIGHT = 22;
+/** Screen space kept clear between a file's name and the next file's frames. */
+const FILE_LABEL_GAP = 12;
+/** The label's padding, pulled back out so its text lines up with the frame's left edge. */
+const LABEL_INSET = 4;
+/** Screen gap between a label and its frame. */
+const LABEL_GAP = 4;
+
+type FrameBox = { id: string; left: number; top: number; right: number; bottom: number };
+
+/** For each frame, the world-space gap to the nearest frame above it that shares some of its columns. */
+function roomAbove(boxes: FrameBox[]): Map<string, number> {
+  const room = new Map<string, number>();
+  for (const box of boxes) {
+    let gap = Infinity;
+    for (const other of boxes) {
+      const overlapsColumns = other.left < box.right && other.right > box.left;
+      if (other === box || !overlapsColumns || other.top >= box.top) continue;
+      gap = Math.min(gap, box.top - other.bottom);
+    }
+    room.set(box.id, gap);
+  }
+  return room;
+}
 
 function showsPlay(node: DesignNode, zoom: number): boolean {
   const width = parseFloat(String(node.style?.width ?? ""));
@@ -116,6 +143,16 @@ export const Canvas = memo(function Canvas() {
   const regions = fileRegions(model, snapshot?.root, (id) => (shadowRoots.get(id)?.host as HTMLElement | undefined)?.offsetWidth);
   const dxOf = (id: string) => regions.get(model.fileOf.get(id) ?? "")?.dx ?? 0;
   const dxOfFile = (file: string) => regions.get(file)?.dx ?? 0;
+  const labelRoom = roomAbove(
+    model.roots.flatMap((id) => {
+      const host = shadowRoots.get(id)?.host as HTMLElement | undefined;
+      const node = model.nodes[id];
+      if (!host || !node) return [];
+      const left = (node.x ?? 0) + dxOf(id);
+      const top = node.y ?? 0;
+      return [{ id, left, top, right: left + host.offsetWidth, bottom: top + host.offsetHeight }];
+    }),
+  );
 
   const toScreen = useCallback(
     (rect: DOMRect): Rect => {
@@ -844,32 +881,46 @@ export const Canvas = memo(function Canvas() {
     >
       <div className="canvas-grid" style={{ backgroundPosition: `${viewport.x}px ${viewport.y}px`, backgroundSize: `${24 * viewport.zoom}px ${24 * viewport.zoom}px` }} />
       <div className="world" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})` }}>
-        {[...regions.values()].map((region) => (
-          <div
-            key={region.file}
-            className={cn("file-label", {
-              "is-selected": selection.length > 0 && model.roots.filter((id) => model.fileOf.get(id) === region.file).every((id) => selection.includes(id)),
-            })}
-            data-file={region.file}
-            title={`${region.file} · click to select its frames, drag to move them`}
-            style={{ left: region.left, top: region.top - 40 / viewport.zoom - 24, transform: `scale(${1 / viewport.zoom})` }}
-          >
-            {region.file.split("/").pop()}
-          </div>
-        ))}
+        {[...regions.values()].map((region) => {
+          const screenRoom = Number.isFinite(region.room) ? region.room * viewport.zoom - FILE_LABEL_GAP : undefined;
+          return (
+            <div
+              key={region.file}
+              className={cn("file-label", {
+                "is-selected": selection.length > 0 && model.roots.filter((id) => model.fileOf.get(id) === region.file).every((id) => selection.includes(id)),
+                "is-cramped": screenRoom !== undefined && screenRoom < LABEL_MIN_WIDTH,
+              })}
+              data-file={region.file}
+              title={`${region.file} · click to select its frames, drag to move them`}
+              style={{ left: region.left, top: region.top - 40 / viewport.zoom - 24, transform: `scale(${1 / viewport.zoom})`, maxWidth: screenRoom }}
+            >
+              <FileJson size={13} className="file-label-icon" aria-hidden />
+              <span className="file-label-name">{region.file.split("/").pop()}</span>
+            </div>
+          );
+        })}
         {model.roots.map((id) => {
           const node = model.nodes[id]!;
           const offset = frameOffset(id);
+          const declaredWidth = parseFloat(String(node.style?.width ?? ""));
+          const width = (shadowRoots.get(id)?.host as HTMLElement | undefined)?.offsetWidth || (Number.isFinite(declaredWidth) ? declaredWidth : undefined);
+          const screenWidth = width === undefined ? undefined : width * viewport.zoom;
           return (
             <div key={id} className="frame-slot" style={{ left: (node.x ?? 0) + dxOf(id) + offset.x, top: (node.y ?? 0) + offset.y }}>
               {node.type !== "text" && (
                 <div
-                  className={cn("frame-label", { "is-selected": selection.includes(id) })}
+                  className={cn("frame-label", {
+                    "is-selected": selection.includes(id),
+                    "is-cramped": (screenWidth !== undefined && screenWidth < LABEL_MIN_WIDTH) || (labelRoom.get(id) ?? Infinity) * viewport.zoom < LABEL_HEIGHT,
+                  })}
                   data-label-for={id}
-                  style={{ transform: `scale(${1 / viewport.zoom})` }}
+                  title={nodeTitle(id, node)}
+                  style={{ transform: `scale(${1 / viewport.zoom}) translate(-${LABEL_INSET}px, -${LABEL_GAP}px)`, maxWidth: screenWidth === undefined ? undefined : screenWidth + 2 * LABEL_INSET }}
                 >
-                  {node.type === "frame" && node.component ? "◇ " : ""}
-                  {nodeTitle(id, node)}
+                  <span className="frame-label-name">
+                    {node.type === "frame" && node.component ? "◇ " : ""}
+                    {nodeTitle(id, node)}
+                  </span>
                   {showsPlay(node, viewport.zoom) && (
                     <button
                       className="frame-label-play"

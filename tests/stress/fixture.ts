@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -140,6 +140,8 @@ export function makeStressProject(shape: StressShape): string {
   const archive = spawnSync("git", ["archive", "HEAD", "examples/shadcn-app"], { cwd: repo, maxBuffer: 64 * 1024 * 1024 });
   const untar = spawnSync("tar", ["-x", "-C", root, "--strip-components=2"], { input: archive.stdout });
   if (archive.status !== 0 || untar.status !== 0) throw new Error(`could not copy the example: ${archive.stderr}${untar.stderr}`);
+  // Measurements were taken without the motion showcase; keep the project the same shape.
+  rmSync(join(root, "designs/motion.lamsa.json"), { force: true });
   writeStressDesigns(root, shape);
   const designs = readdirSync(join(root, "designs")).filter((name) => name.endsWith(".lamsa.json"));
   mkdirSync(join(root, ".lamsa"), { recursive: true });

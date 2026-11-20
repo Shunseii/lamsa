@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,8 @@ function copyExample(dest: string, { openAll = true }: { openAll?: boolean } = {
   const archive = spawnSync("git", ["archive", "HEAD", "examples/shadcn-app"], { cwd: repo, maxBuffer: 64 * 1024 * 1024 });
   const untar = spawnSync("tar", ["-x", "-C", dest, "--strip-components=2"], { input: archive.stdout });
   if (archive.status !== 0 || untar.status !== 0) throw new Error(`could not copy the example: ${archive.stderr}${untar.stderr}`);
+  // The motion showcase is for people trying the example; the tests' canvas positions and file counts assume the other two files.
+  rmSync(join(dest, "designs/motion.lamsa.json"), { force: true });
   if (!openAll) return;
   // Most tests want every file open, as if the user had already answered the first-open prompt.
   const designs = readdirSync(join(dest, "designs")).filter((name) => name.endsWith(".lamsa.json"));
@@ -435,6 +437,68 @@ describe("desktop editor selection and moving", () => {
     await win.mouse.wheel(0, -100);
     await win.keyboard.up("Control");
     await expect.poll(zoom).toBe(start);
+  });
+
+  it("keeps frame labels within their frame's width, and hides them when the frame is too narrow or too close below another; file names shrink to an icon", async () => {
+    const zoomBy = async (notches: number) => {
+      await win.mouse.move(800, 500);
+      await win.keyboard.down("Control");
+      for (let i = 0; i < Math.abs(notches); i++) await win.mouse.wheel(0, notches > 0 ? 100 : -100);
+      await win.keyboard.up("Control");
+      await win.waitForTimeout(100);
+    };
+    const labels = () =>
+      win.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>(".frame-label")]
+          .filter((label) => !label.closest(".frame-slot")!.matches(":hover") && !label.classList.contains("is-selected"))
+          .map((label) => {
+            const host = document.querySelector<HTMLElement>(`[data-root-id="${label.dataset.labelFor}"]`)!;
+            const box = label.getBoundingClientRect();
+            const coversAnotherFrame = [...document.querySelectorAll<HTMLElement>("[data-root-id]")].some((other) => {
+              if (other === host) return false;
+              const rect = other.getBoundingClientRect();
+              return rect.left < box.right && rect.right > box.left && rect.top < box.bottom && rect.bottom > box.top;
+            });
+            return {
+              label: label.querySelector(".frame-label-name")!.getBoundingClientRect().width,
+              frame: host.getBoundingClientRect().width,
+              hidden: getComputedStyle(label).visibility === "hidden",
+              coversAnotherFrame,
+            };
+          }),
+      );
+    await win.keyboard.press("Escape");
+    await zoomBy(12);
+    const shown = await labels();
+    expect(shown.length).toBeGreaterThan(0);
+    for (const { label, frame, hidden, coversAnotherFrame } of shown) {
+      if (frame < 40) expect(hidden).toBe(true);
+      if (hidden) continue;
+      expect(label).toBeLessThanOrEqual(frame + 1);
+      expect(coversAnotherFrame).toBe(false);
+    }
+    expect(shown.some((entry) => entry.hidden)).toBe(true);
+    const fileLabels = await win.evaluate(() => {
+      const all = [...document.querySelectorAll<HTMLElement>(".file-label")];
+      const shownName = (label: HTMLElement) => getComputedStyle(label.querySelector(".file-label-name")!).display !== "none";
+      const resting = all.filter((label) => !label.classList.contains("is-selected"));
+      const overlaps = (a: DOMRect, b: DOMRect) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+      return {
+        count: all.length,
+        withIcon: all.filter((label) => (label.querySelector(".file-label-icon")?.getBoundingClientRect().width ?? 0) > 0).length,
+        cramped: all.filter((label) => label.classList.contains("is-cramped")).length,
+        crampedShowingName: resting.filter((label) => label.classList.contains("is-cramped") && shownName(label)).length,
+        overlapping: resting
+          .filter(shownName)
+          .filter((label) => resting.some((other) => other !== label && overlaps(label.getBoundingClientRect(), other.getBoundingClientRect()))).length,
+      };
+    });
+    expect(fileLabels.count).toBeGreaterThan(1);
+    expect(fileLabels.withIcon).toBe(fileLabels.count);
+    expect(fileLabels.cramped).toBeGreaterThan(0);
+    expect(fileLabels.crampedShowingName).toBe(0);
+    expect(fileLabels.overlapping).toBe(0);
+    await zoomBy(-12);
   });
 
   it("closes an open menu on an outside click without changing the selection", async () => {

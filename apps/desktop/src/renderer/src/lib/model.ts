@@ -139,6 +139,8 @@ export interface FileRegion {
   dx: number;
   left: number;
   top: number;
+  /** World-space room to the right before the next file's frames start; Infinity for the last file. */
+  room: number;
 }
 
 const FILE_GAP = 200;
@@ -193,9 +195,12 @@ export function fileRegions(model: Model, project?: string, widthOf?: (id: strin
     edge = Math.max(edge, extent.maxX + dx);
   }
   const regions = new Map<string, FileRegion>();
+  const lefts = [...extents].map(([file, extent]) => extent.minX + placedOffsets.get(file)!);
   for (const [file, extent] of extents) {
     const dx = placedOffsets.get(file)!;
-    regions.set(file, { file, dx, left: extent.minX + dx, top: extent.minY });
+    const left = extent.minX + dx;
+    const nextLeft = Math.min(...lefts.filter((other) => other > left));
+    regions.set(file, { file, dx, left, top: extent.minY, room: nextLeft - left });
   }
   return regions;
 }

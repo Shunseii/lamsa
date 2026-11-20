@@ -58,13 +58,13 @@ describe("editor with a large project", () => {
 
   it("scrolls a layer far down the list to the middle when it is selected on the canvas", async () => {
     const target = await page.evaluate(() => {
-      for (const label of document.querySelectorAll<HTMLElement>(".frame-label")) {
-        const box = label.getBoundingClientRect();
-        if (document.elementFromPoint(box.left + 8, box.top + box.height / 2) !== label) continue;
-        const host = document.querySelector(`[data-root-id="${label.dataset.labelFor}"]`)!;
-        const inner = [...host.shadowRoot!.querySelectorAll<HTMLElement>("[data-node-id]")].filter((element) => !element.dataset.nodeId!.includes("/")).at(-1)!;
+      for (const host of document.querySelectorAll<HTMLElement>("[data-root-id]")) {
+        const inner = [...host.shadowRoot!.querySelectorAll<HTMLElement>("[data-node-id]")].filter((element) => !element.dataset.nodeId!.includes("/")).at(-1);
+        if (!inner) continue;
         const r = inner.getBoundingClientRect();
-        return { id: inner.dataset.nodeId!, x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        const center = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        if (r.width < 2 || r.height < 2 || document.elementFromPoint(center.x, center.y) !== host) continue;
+        return { id: inner.dataset.nodeId!, ...center };
       }
       throw new Error("no frame is clear of the panels");
     });
