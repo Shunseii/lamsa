@@ -1,6 +1,6 @@
 /** Which editor panel lives in which dock. Pure functions, so the store and the tests share them. */
 
-export const PANEL_IDS = ["agent", "layers", "files", "components", "properties", "preview"] as const;
+export const PANEL_IDS = ["agent", "layers", "files", "components", "properties", "preview", "comments"] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
 export const DOCK_IDS = ["left", "right", "centre"] as const;
@@ -17,7 +17,7 @@ export type PanelLayout = Record<DockId, DockState>;
 
 export const DEFAULT_LAYOUT: PanelLayout = {
   left: { tabs: ["agent", "layers", "files", "components"], active: "layers", size: null },
-  right: { tabs: ["properties"], active: "properties", size: null },
+  right: { tabs: ["properties", "comments"], active: "properties", size: null },
   centre: { tabs: ["preview"], active: "preview", size: null },
 };
 

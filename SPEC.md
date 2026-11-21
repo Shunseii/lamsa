@@ -85,6 +85,17 @@ v1: a plain `content` string per text node. Rich text runs come later, added wit
 - Drag-and-drop in the editor copies into `assetsDir`. Git LFS is optional.
 - Remote URLs get a lint warning.
 
+### Comments
+
+Comments are part of the design conversation, so they are plain files in the repo, committed with the designs, and the agent reads and answers them through the CLI.
+
+- **One file per thread** in `commentsDir` (default `designs/comments/<id>.json`, IDs like node IDs). Separate files, not a section in the design file, so commenting never churns design files or their diffs, two people commenting never touch the same file, and a reply only touches its own thread. Threads pin to node IDs, which are global, so they survive a node moving between files (`lamsa split`).
+- A thread: `nodeId`, an optional `offset` (a point inside the node, in its own unscaled pixels; the top-right corner when missing), `author`, `createdAt`, `text`, `replies` (each `author`, `createdAt`, `text`), and `resolved` (`author`, `at`) once closed. Published as a zod schema like the rest.
+- **Committed, not gitignored:** reviewers see the request next to the change in the pull request, teammates and CI agents get the same open comments on their clones, and resolved threads keep the reason for a change. Nothing in them is machine-local (unlike `.lamsa/`).
+- **Authors:** `--author`, else `LAMSA_AUTHOR`, else the agent running the CLI (`LAMSA_AGENT_NAME`, or Claude Code), else git's `user.name`, else the OS user. The editor always signs as the person (git's `user.name`).
+- A thread on a deleted node is kept (the conversation still matters): `lamsa validate` warns, `lamsa comments` reports `node: null`, and the editor lists it as orphaned.
+- Later: link threads to PR review comments; the hosted service can sync the same files.
+
 ## CLI (`lamsa`)
 
 Distributed as the `lamsa` npm package with a `lamsa` binary.
@@ -104,12 +115,17 @@ Command surface (hybrid):
 | Setup / upkeep | `init`, `migrate` |
 | Show the user | `open` (optional; launches or focuses the desktop app) |
 | Review | `report` (before/after PNGs of affected screens + markdown summary; the GitHub Action wraps it) |
+| Comments | `comments [--open\|--resolved] [--node <id>]`, `comments add --node <id> [--offset x,y] "<text>"`, `comments reply <id> "<text>"`, `comments resolve <id> [--reply "<text>"]`, `comments reopen <id>` (`comment` is an alias) |
+
+The agent guide (`lamsa skill`) tells agents to check open comments before starting, address them, and resolve each with a one-line reply saying what they did (or reply and leave it open when unsure).
 
 Simple property tweaks are raw JSON edits; raw edits are first-class.
 
 **Rendering:** all PNG export goes through the CLI renderer (playwright-core with system Chrome, or a one-time Chromium download) so output is identical everywhere.
 
 **Selection:** the desktop app writes a gitignored `.lamsa/session.json` with the current selection; `lamsa selection` reads it if present. The CLI never requires the app to be open or closed.
+
+**Activity:** in a project with a `.lamsa/` folder (the editor creates it), each write command (`add`, `move`, `delete`) and each targeted read (`tree <targets>`, `render <targets>`) replaces `.lamsa/activity.json` atomically with `{ agent, command, kind: "read" | "write", ids, file, at }`: the layers it touched (at most 50; for `delete`, the deleted layers' parents). `agent` is `LAMSA_AGENT_NAME`, else `Claude` when `CLAUDECODE=1`, else `Agent`. The editor uses it to show where the agent works; failures to write it never fail the command.
 
 ## Desktop app
 
@@ -126,6 +142,8 @@ Agent edits appear live, with no reload and no "close without saving". This is a
 - A half-written or invalid file keeps the last good state on screen with the "Invalid file" state; the editor never rewrites the agent's file.
 - Autosaves, so unsaved local edits are near zero. On conflict with an external write, merges per node.
 - Undo/redo is per session and in memory; each operation is one diff. External changes are not in the undo history; undo entries touching a node changed externally are dropped rather than overwriting the external change.
+- Agent changes are highlighted: every layer an external change added or changed gets an outline on the canvas and a tint on its layers row in the agent colour (`--color-agent`, distinct from the selection accent), held 1.5 s then faded over 600 ms. An added subtree shows as its top layer; past 40 layers a change shows per top-level frame (at most 40), so large rewrites stay cheap. A layer changed again restarts its fade. The user's own edits, undo/redo and reloads never highlight. Highlights are overlays, never written to the design. With reduced motion they show and then go without fading. The "changed on disk" toast offers "Show changes" to fit them in view.
+- Agent presence: a labelled cursor (the agent's name) points at the first changed layer of each external change, and at the layers named in `.lamsa/activity.json` as each CLI command runs: solid for writes, faint and labelled "· reading" for reads, which never highlight. It glides between layers, lingers 4 s after the agent's last activity, then fades. Direct JSON edits move it too (named from the latest CLI activity in the last 30 s, or the editor's own chat while it runs a turn, else "Agent").
 
 ### v1 editing surface
 
@@ -138,8 +156,9 @@ Agent edits appear live, with no reload and no "close without saving". This is a
 - **Insert:** frame, text, rect, image (drag in), lucide icon (searchable picker), component instance.
 - **Components:** switch instance props/variants, go to main component, detach.
 - Copy/paste, duplicate, delete, group into frame.
+- **Comments:** a comment tool (`M`) pins a comment to the layer clicked (the same layer a click would select; `⌘`-click for the deepest). Pins follow the layer through pan, zoom and edits; a pin opens its thread to read, reply, resolve or reopen. A Comments panel (a dock tab, open count on its icon) lists threads by Open, Resolved or All; picking one selects and shows its layer, and threads on deleted layers show as orphaned and open in the panel. Replies and resolves from the agent's CLI appear live (the comments directory is watched), with a toast.
 
-Later: create component from selection, visual gradient/shadow/mask editors, rotation handles, comments, prototyping links, history UI (git is the history).
+Later: create component from selection, visual gradient/shadow/mask editors, rotation handles, prototyping links, history UI (git is the history).
 
 ### In-app AI
 
@@ -178,7 +197,6 @@ A pnpm monorepo, all TypeScript, so the CLI and the editor share one core and va
 
 - Plugin/mod system: three tiers (config, typed pure-function plugins, fork) with a workspace-trust security model (tracked as tsk T23).
 - Built-in chat UI over the agent CLI's structured output (no API keys; blocked on vendor-terms check). Tracked in tsk.
-- On-canvas comments pinned to node IDs, stored as files and readable by the agent (`lamsa comments --json`). Tracked in tsk.
 - Team cloud service (hosted editor, multiplayer, hosted PR previews). Not designed yet.
 - Rich text runs.
 - Generic HTML/CSS export.

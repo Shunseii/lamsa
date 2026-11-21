@@ -31,11 +31,13 @@ function visibleRect(model: Model, id: string): DOMRect | null {
   return null;
 }
 
-export function fitTo(target: "all" | "selection") {
+/** Fits the view to every frame, the selection, or the given layers. */
+export function fitTo(target: "all" | "selection" | readonly string[]) {
   const { model, selection, viewport, setViewport, panels, layout } = useEditor.getState();
   const box = canvasBox();
   if (!box) return;
-  const ids = target === "selection" && selection.length ? selection : model.roots;
+  const picked = typeof target !== "string" ? target.filter((id) => model.nodes[id]) : target === "selection" ? selection : [];
+  const ids = picked.length ? picked : model.roots;
   let left = Infinity;
   let top = Infinity;
   let right = -Infinity;

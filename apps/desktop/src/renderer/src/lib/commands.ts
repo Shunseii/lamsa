@@ -291,7 +291,7 @@ export function installShortcuts(): () => void {
       if (state.tool !== "select") return state.setTool("select");
       return run("select-parent");
     }
-    const tools: Record<string, Parameters<typeof state.setTool>[0]> = { v: "select", h: "hand", f: "frame", t: "text", r: "rect", c: "component" };
+    const tools: Record<string, Parameters<typeof state.setTool>[0]> = { v: "select", h: "hand", f: "frame", t: "text", r: "rect", c: "component", m: "comment" };
     if (tools[key] && !e.shiftKey && !e.altKey) {
       e.preventDefault();
       state.setTool(tools[key]!);

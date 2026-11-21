@@ -12,6 +12,17 @@
       },
       "type": "frame"
     },
+    "02hkawtz": {
+      "content": "#7346c9",
+      "index": "a1",
+      "parentId": "WXyAOVVr",
+      "style": {
+        "color": "{color.ink-3}",
+        "font-family": "{font.mono}",
+        "font-size": 11
+      },
+      "type": "text"
+    },
     "0SGelmh0": {
       "content": "Body · 13",
       "index": "a0",
@@ -185,6 +196,23 @@
       },
       "type": "frame"
     },
+    "1uq7rJwB": {
+      "componentId": "NdX7oR04",
+      "index": "a0",
+      "name": "LayerRow",
+      "parentId": "6iz5cqnV",
+      "props": {
+        "depth": "1",
+        "kind": "frame",
+        "label": "Header",
+        "state": "agent-changed",
+        "twisty": "open"
+      },
+      "style": {
+        "width": "100%"
+      },
+      "type": "instance"
+    },
     "1v5bO5Lf": {
       "content": "Copy",
       "index": "a1",
@@ -211,6 +239,17 @@
       },
       "type": "frame"
     },
+    "22ALZiLm": {
+      "index": "aEV",
+      "name": "Cell",
+      "parentId": "vTduuPPy",
+      "style": {
+        "align-items": "center",
+        "display": "flex",
+        "width": 236
+      },
+      "type": "frame"
+    },
     "2GEZ7vMy": {
       "index": "aD",
       "name": "Cell",
@@ -231,6 +270,17 @@
         "flex-direction": "column",
         "gap": 2,
         "padding": "8px 10px"
+      },
+      "type": "frame"
+    },
+    "2MkGEJ2J": {
+      "index": "aJV",
+      "name": "Cell",
+      "parentId": "vTduuPPy",
+      "style": {
+        "align-items": "center",
+        "display": "flex",
+        "width": 236
       },
       "type": "frame"
     },
@@ -309,6 +359,17 @@
         "font-family": "{font.mono}",
         "font-size": 11,
         "white-space": "nowrap"
+      },
+      "type": "text"
+    },
+    "3PKcr1a5": {
+      "content": "#ede6fa",
+      "index": "a1",
+      "parentId": "DdSZAygt",
+      "style": {
+        "color": "{color.ink-3}",
+        "font-family": "{font.mono}",
+        "font-size": 11
       },
       "type": "text"
     },
@@ -521,6 +582,23 @@
       },
       "type": "instance"
     },
+    "51RSGYjw": {
+      "componentId": "NdX7oR04",
+      "index": "a0",
+      "name": "LayerRow",
+      "parentId": "2MkGEJ2J",
+      "props": {
+        "depth": "1",
+        "kind": "icon",
+        "label": "lock",
+        "state": "agent-changed",
+        "twisty": "none"
+      },
+      "style": {
+        "width": "100%"
+      },
+      "type": "instance"
+    },
     "57kNJIIK": {
       "content": "—",
       "index": "aJ",
@@ -629,6 +707,27 @@
       },
       "type": "text"
     },
+    "6ZZoGcW3": {
+      "content": "color.agent",
+      "index": "a0",
+      "parentId": "WXyAOVVr",
+      "style": {
+        "font-family": "{font.mono}",
+        "font-size": 12
+      },
+      "type": "text"
+    },
+    "6iz5cqnV": {
+      "index": "a9V",
+      "name": "Cell",
+      "parentId": "vTduuPPy",
+      "style": {
+        "align-items": "center",
+        "display": "flex",
+        "width": 236
+      },
+      "type": "frame"
+    },
     "6qCQbACk": {
       "content": "#ffffff",
       "index": "a1",
@@ -660,6 +759,19 @@
         "font-family": "{font.mono}",
         "font-size": 11,
         "white-space": "nowrap"
+      },
+      "type": "text"
+    },
+    "7E056qeR": {
+      "content": "Agent",
+      "index": "a0",
+      "parentId": "qedgGTpL",
+      "style": {
+        "color": "{color.ink-3}",
+        "font-size": 11,
+        "font-weight": "{font-weight.semibold}",
+        "letter-spacing": "0.06em",
+        "text-transform": "uppercase"
       },
       "type": "text"
     },
@@ -1036,6 +1148,22 @@
       },
       "type": "instance"
     },
+    "BSGB5h7p": {
+      "index": "a1",
+      "name": "Swatch · agent-soft",
+      "parentId": "wbpc0T7D",
+      "style": {
+        "background": "{color.surface}",
+        "border": "1px solid {color.line}",
+        "border-radius": "{radius.xl}",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 0,
+        "overflow": "hidden",
+        "width": 160
+      },
+      "type": "frame"
+    },
     "BW3uT3Tf": {
       "index": "a9",
       "name": "Cell",
@@ -1157,6 +1285,18 @@
         "align-items": "center",
         "display": "flex",
         "width": 130
+      },
+      "type": "frame"
+    },
+    "DdSZAygt": {
+      "index": "a1",
+      "name": "Meta",
+      "parentId": "BSGB5h7p",
+      "style": {
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 2,
+        "padding": "8px 10px"
       },
       "type": "frame"
     },
@@ -1450,6 +1590,17 @@
       },
       "type": "instance"
     },
+    "HhXPGZz7": {
+      "index": "aP",
+      "name": "Cell",
+      "parentId": "vTduuPPy",
+      "style": {
+        "align-items": "center",
+        "display": "flex",
+        "width": 236
+      },
+      "type": "frame"
+    },
     "Hzvw2Dl3": {
       "index": "a0",
       "name": "Color",
@@ -1606,6 +1757,22 @@
       "parentId": "u3TsRQUk",
       "style": {},
       "type": "text"
+    },
+    "KOWq9JCG": {
+      "index": "a0",
+      "name": "Swatch · agent",
+      "parentId": "wbpc0T7D",
+      "style": {
+        "background": "{color.surface}",
+        "border": "1px solid {color.line}",
+        "border-radius": "{radius.xl}",
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 0,
+        "overflow": "hidden",
+        "width": 160
+      },
+      "type": "frame"
     },
     "KbTOhMhc": {
       "componentId": "PSjxI97L",
@@ -2013,9 +2180,21 @@
               "default",
               "hover",
               "selected",
-              "hidden"
+              "hidden",
+              "agent-changed"
             ],
             "overrides": {
+              "agent-changed": {
+                "NdX7oR04": {
+                  "style": {
+                    "background": "{color.agent-soft}",
+                    "color": "{color.ink}"
+                  }
+                },
+                "dxXnSVtR": {
+                  "hidden": true
+                }
+              },
               "default": {
                 "dxXnSVtR": {
                   "hidden": true
@@ -2168,6 +2347,18 @@
         "height": 72
       },
       "type": "frame"
+    },
+    "OiXfP7g4": {
+      "content": "agent-changed",
+      "index": "a4V",
+      "parentId": "vTduuPPy",
+      "style": {
+        "color": "{color.ink-3}",
+        "font-family": "{font.mono}",
+        "font-size": 11,
+        "white-space": "nowrap"
+      },
+      "type": "text"
     },
     "OlQX3GQ3": {
       "componentId": "ZW3nSYnn",
@@ -2975,6 +3166,18 @@
       },
       "type": "instance"
     },
+    "WXyAOVVr": {
+      "index": "a1",
+      "name": "Meta",
+      "parentId": "KOWq9JCG",
+      "style": {
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 2,
+        "padding": "8px 10px"
+      },
+      "type": "frame"
+    },
     "WaOQdZnf": {
       "index": "a1",
       "name": "Meta",
@@ -2997,6 +3200,23 @@
         "height": 72
       },
       "type": "frame"
+    },
+    "XC4I0aI8": {
+      "componentId": "NdX7oR04",
+      "index": "a0",
+      "name": "LayerRow",
+      "parentId": "22ALZiLm",
+      "props": {
+        "depth": "1",
+        "kind": "text",
+        "label": "Checkout",
+        "state": "agent-changed",
+        "twisty": "none"
+      },
+      "style": {
+        "width": "100%"
+      },
+      "type": "instance"
     },
     "XJod2TwP": {
       "content": "hover",
@@ -3670,6 +3890,16 @@
       },
       "type": "frame"
     },
+    "ewePs36F": {
+      "content": "color.agent-soft",
+      "index": "a0",
+      "parentId": "DdSZAygt",
+      "style": {
+        "font-family": "{font.mono}",
+        "font-size": 12
+      },
+      "type": "text"
+    },
     "f3l9PObg": {
       "content": "Header",
       "index": "a3",
@@ -4187,6 +4417,17 @@
       },
       "type": "frame"
     },
+    "lSAFCeHh": {
+      "index": "a0",
+      "name": "Color",
+      "parentId": "KOWq9JCG",
+      "style": {
+        "background": "{color.agent}",
+        "border-bottom": "1px solid {color.line}",
+        "height": 72
+      },
+      "type": "frame"
+    },
     "lXkNetiP": {
       "index": "a0",
       "name": "Swatch · bg",
@@ -4449,6 +4690,25 @@
       },
       "type": "text"
     },
+    "oRb3CyE9": {
+      "componentId": "NdX7oR04",
+      "index": "a0",
+      "name": "LayerRow",
+      "parentId": "HhXPGZz7",
+      "props": {
+        "depth": "1",
+        "kind": "instance",
+        "label": "Pay button",
+        "meta": "Button",
+        "showMeta": true,
+        "state": "agent-changed",
+        "twisty": "none"
+      },
+      "style": {
+        "width": "100%"
+      },
+      "type": "instance"
+    },
     "olq2t0i6": {
       "index": "a0",
       "name": "Color",
@@ -4514,6 +4774,17 @@
         "flex-direction": "column",
         "gap": 2,
         "padding": "8px 10px"
+      },
+      "type": "frame"
+    },
+    "qedgGTpL": {
+      "index": "a4",
+      "name": "Agent",
+      "parentId": "8J6r9IIr",
+      "style": {
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": 10
       },
       "type": "frame"
     },
@@ -5118,7 +5389,7 @@
         "display": "grid",
         "font-family": "{font.sans}",
         "font-size": 13,
-        "grid-template-columns": "auto repeat(4, 236px)",
+        "grid-template-columns": "auto repeat(5, 236px)",
         "line-height": 1.45,
         "padding": 24,
         "row-gap": 16
@@ -5191,6 +5462,18 @@
         "flex-direction": "column",
         "gap": 2,
         "padding": "8px 10px"
+      },
+      "type": "frame"
+    },
+    "wbpc0T7D": {
+      "index": "a1",
+      "name": "Swatches",
+      "parentId": "qedgGTpL",
+      "style": {
+        "align-items": "flex-start",
+        "display": "flex",
+        "flex-wrap": "wrap",
+        "gap": 16
       },
       "type": "frame"
     },
@@ -5300,6 +5583,17 @@
         "white-space": "nowrap"
       },
       "type": "text"
+    },
+    "xLu3MHVb": {
+      "index": "a0",
+      "name": "Color",
+      "parentId": "BSGB5h7p",
+      "style": {
+        "background": "{color.agent-soft}",
+        "border-bottom": "1px solid {color.line}",
+        "height": 72
+      },
+      "type": "frame"
     },
     "xVCyLlKx": {
       "index": "a8",

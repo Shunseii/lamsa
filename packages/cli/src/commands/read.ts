@@ -6,6 +6,7 @@ import {
   indexNodes,
   isDesignFile,
   readSession,
+  recordActivity,
   toRepoPath,
   treeLines,
   type Project,
@@ -61,6 +62,9 @@ export async function treeCommand({
   const locations = indexNodes(project);
   const from = resolveTargets(project, targets);
   const lines = treeLines({ nodes, index, from, maxDepth: depth ?? Infinity });
+  if (targets.length > 0) {
+    await recordActivity({ root: project.root, activity: { command: "tree", kind: "read", ids: from, file: from[0] ? locations.get(from[0])?.file : undefined } });
+  }
   out.result(
     {
       ok: true,

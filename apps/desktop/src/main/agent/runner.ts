@@ -186,6 +186,11 @@ export class AgentRunner {
   }
 
   /** A design file changed on disk; while a turn runs, that's the agent's doing. */
+  /** A turn is running or just finished, so disk changes now are the agent's. */
+  get busy(): boolean {
+    return Boolean(this.turn ?? this.trailing);
+  }
+
   noteChange(change: ExternalChange) {
     const turn = this.turn ?? this.trailing;
     if (!turn || !change.changedIds.length) return;

@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { checkCommandResult } from "./run.js";
 import { fmtCommand, validateCommand } from "./commands/check.js";
+import { commentAddCommand, commentReopenCommand, commentReplyCommand, commentResolveCommand, commentsCommand } from "./commands/comments.js";
 import { addCommand, deleteCommand, moveCommand, splitCommand } from "./commands/edit.js";
 import { componentsCommand, diffCommand, selectionCommand, tokensCommand, treeCommand } from "./commands/read.js";
 import { renderCommand } from "./commands/render.js";
@@ -138,6 +139,55 @@ program
   .command("selection")
   .description("what the user has selected in the desktop editor")
   .action(() => run(() => selectionCommand({ out: out() })));
+
+const joinText = (words: string[]) => words.join(" ");
+
+const comments = program
+  .command("comments")
+  .alias("comment")
+  .description("comment threads pinned to layers: list them, or add, reply, resolve");
+
+comments
+  .command("list", { isDefault: true })
+  .description("list comment threads (the default)")
+  .option("--open", "only open threads")
+  .option("--resolved", "only resolved threads")
+  .option("--node <id>", "only threads pinned to this node")
+  .action((o: { open?: boolean; resolved?: boolean; node?: string }) =>
+    run(() => commentsCommand({ out: out(), open: !!o.open, resolved: !!o.resolved, node: o.node })),
+  );
+
+comments
+  .command("add <text...>")
+  .description("pin a new comment to a node")
+  .requiredOption("--node <id>", "node to pin it to")
+  .option("--offset <x,y>", "point inside the node, in its own pixels (default: its top-right corner)")
+  .option("--author <name>", "who is commenting (default: LAMSA_AUTHOR, the agent, git user.name, the OS user)")
+  .action((text: string[], o: { node: string; offset?: string; author?: string }) =>
+    run(() => commentAddCommand({ out: out(), node: o.node, text: joinText(text), offset: o.offset, author: o.author })),
+  );
+
+comments
+  .command("reply <id> <text...>")
+  .description("reply to a comment thread")
+  .option("--author <name>", "who is replying")
+  .action((id: string, text: string[], o: { author?: string }) =>
+    run(() => commentReplyCommand({ out: out(), id, text: joinText(text), author: o.author })),
+  );
+
+comments
+  .command("resolve <id>")
+  .description("mark a thread resolved, optionally with a closing reply")
+  .option("--reply <text>", "say what you did")
+  .option("--author <name>", "who is resolving")
+  .action((id: string, o: { reply?: string; author?: string }) =>
+    run(() => commentResolveCommand({ out: out(), id, reply: o.reply, author: o.author })),
+  );
+
+comments
+  .command("reopen <id>")
+  .description("reopen a resolved thread")
+  .action((id: string) => run(() => commentReopenCommand({ out: out(), id })));
 
 program
   .command("open [file]")

@@ -21,6 +21,8 @@
   --color-warn-soft: #faefd9;
   --color-danger: #be3329;
   --color-danger-soft: #fbe2df;
+  --color-agent: #7346c9;
+  --color-agent-soft: #ede6fa;
   --shadow-panel: 0 1px 2px rgba(24, 22, 18, 0.06), 0 8px 24px rgba(24, 22, 18, 0.08);
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
   --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
@@ -86,8 +88,24 @@ kbd { font: 11px var(--font-mono); color: var(--color-ink-3); background: var(--
 .overlay { position: absolute; inset: 0; pointer-events: none; }
 .ov-hover { position: absolute; outline: 2px solid var(--color-accent); outline-offset: 0; opacity: 0.55; }
 .ov-selection { position: absolute; outline: 1.5px solid var(--color-accent); }
-.ov-flash { position: absolute; outline: 2px solid var(--color-ok); background: rgba(30, 127, 74, 0.08); animation: flash 1.6s ease-out forwards; }
-@keyframes flash { from { opacity: 1; } to { opacity: 0; } }
+/* Agent changes: held for 1.5s, then a 600ms fade (HIGHLIGHT_HOLD_MS / HIGHLIGHT_FADE_MS in lib/highlights.ts). */
+.ov-flash { position: absolute; outline: 2px solid var(--color-agent); outline-offset: 1px; border-radius: 2px; background: color-mix(in srgb, var(--color-agent) 8%, transparent); animation: agent-flash 2100ms forwards; }
+@keyframes agent-flash {
+  0%, 71.4% { opacity: 1; animation-timing-function: ease-out; }
+  100% { opacity: 0; }
+}
+/* The agent's cursor rides in its own world-space layer above the overlay; it glides between layers and fades when idle. */
+.agent-layer { pointer-events: none; }
+.agent-cursor { position: absolute; left: 0; top: 0; transition: transform 320ms var(--ease-out-strong), opacity 600ms ease-out; animation: agent-cursor-in 160ms ease-out; }
+/* Reading is quieter than writing: a faint arrow and a pale, still solid, label that stays readable over content. */
+.agent-cursor[data-kind="read"] .agent-cursor-arrow { opacity: 0.6; }
+.agent-cursor[data-kind="read"] .agent-cursor-label { background: var(--color-agent-soft); color: var(--color-agent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-agent) 25%, transparent); }
+.agent-cursor[data-state="leaving"] { opacity: 0; }
+@keyframes agent-cursor-in { from { opacity: 0; } }
+.agent-cursor-body { display: flex; align-items: flex-start; transform-origin: 0 0; }
+.agent-cursor-arrow { margin: -2px 0 0 -2px; color: var(--color-agent); fill: var(--color-agent); stroke: var(--color-surface); stroke-width: 1.5; filter: drop-shadow(0 1px 1px rgba(24, 22, 18, 0.25)); }
+.agent-cursor-label { margin: 12px 0 0 -4px; padding: 2px 6px; border-radius: 6px; background: var(--color-agent); color: var(--color-on-accent); font-size: 11px; font-weight: 500; line-height: 16px; white-space: nowrap; box-shadow: 0 1px 2px rgba(24, 22, 18, 0.2); }
+.agent-cursor-doing { font-weight: 400; opacity: 0.85; }
 .ov-handle { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; background: #fff; border: 1.5px solid var(--color-accent); border-radius: 2px; pointer-events: auto; }
 .ov-handle-nw, .ov-handle-se { cursor: nwse-resize; }
 .ov-handle-ne, .ov-handle-sw { cursor: nesw-resize; }
@@ -154,6 +172,7 @@ kbd { font: 11px var(--font-mono); color: var(--color-ink-3); background: var(--
 .tip-wrap[data-pressed] .tip { display: none; }
 .tip-row { display: flex; align-items: center; gap: 12px; }
 .tip-hint { color: var(--color-ink-3); }
+.tip-end .tip { left: auto; right: 0; transform: none; }
 
 /* Floating panels */
 .panel { position: absolute; background: var(--color-surface); border: 1px solid var(--color-line); border-radius: 14px; box-shadow: var(--shadow-panel); display: flex; flex-direction: column; overflow: hidden; z-index: 10; user-select: none; }
@@ -207,11 +226,15 @@ kbd { font: 11px var(--font-mono); color: var(--color-ink-3); background: var(--
 .layer-list { padding: 0 6px 12px; }
 .layer-file { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 8px; white-space: nowrap; font-weight: 500; color: var(--color-ink-2); }
 .layer-file > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.layer-file-close, .file-close { opacity: 0; }
-.layer-file:hover .layer-file-close, .file-row:hover .file-close, .layer-file-close:focus-visible, .file-close:focus-visible { opacity: 1; }
+.layer-file-close, .layer-file-toggle, .file-close { opacity: 0; }
+.layer-file:hover :is(.layer-file-close, .layer-file-toggle), .file-row:hover .file-close, .layer-file-close:focus-visible, .layer-file-toggle:focus-visible, .file-close:focus-visible { opacity: 1; }
+.layer-file .tip { font-weight: 400; }
+/* The collapse buttons swap icons on click; a removed icon under the pointer would swallow the tooltip's pointerleave. */
+.layers-collapse svg, .layer-file-toggle svg { pointer-events: none; }
 .files-add { padding: 6px 2px; }
 .search-row { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 2px; padding-right: 6px; background: var(--color-surface); }
 .search-row .search { flex: 1; min-width: 0; margin-right: 2px; }
+.search-row .icon-btn:disabled { opacity: 0.4; background: none; color: var(--color-ink-2); }
 .file-row { padding: 0 6px 0 0; }
 .file-row .file-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 8px; text-align: left; }
 .list-row.is-closed { color: var(--color-ink-3); }
@@ -233,15 +256,20 @@ kbd { font: 11px var(--font-mono); color: var(--color-ink-3); background: var(--
 .layer-row.drop-before::before, .layer-row.drop-after::after { content: ""; position: absolute; left: 8px; right: 8px; height: 2px; background: var(--color-accent); }
 .layer-row.drop-before::before { top: -1px; }
 .layer-row.drop-after::after { bottom: -1px; }
+.layer-flash { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: color-mix(in srgb, var(--color-agent) 14%, transparent); animation: agent-flash 2100ms forwards; }
 .layer-name { flex: 1; min-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .layer-meta { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--color-ink-3); }
 /* Deep trees scroll sideways (LayersPanel sizes .layers-content from the deepest row); the search row, file headers and each row's trailing badge and toggles stay put. */
 .layers-body .search-row { left: 0; width: var(--layers-view-w, auto); }
 .layers-body .layer-file { position: sticky; left: 6px; width: calc(var(--layers-view-w, 100%) - 12px); }
+/* Above the rows below it, so its buttons' tooltips aren't covered. */
+.layers-body .layer-file:hover { z-index: 1; }
 /* Pinned to the right while the row scrolls sideways. Its fill runs through the row's right padding (negative margins keep
    the row's layout) and ::after paints over the list's gutter, so a long name never shows beside or behind the toggles. */
 .layer-trail { position: sticky; right: 6px; display: flex; align-items: center; gap: 6px; flex-shrink: 0; align-self: stretch; padding: 0 8px 0 6px; margin: 0 -8px 0 -6px; border-radius: 0 7px 7px 0; background: var(--row-fill); }
 .layer-trail::after { content: ""; position: absolute; top: 0; bottom: 0; left: 100%; width: 6px; background: var(--color-surface); }
+/* A name running under the pinned trail fades out instead of being cut mid-letter. */
+.layer-trail::before { content: ""; position: absolute; top: 0; bottom: 0; right: 100%; width: 16px; pointer-events: none; background: linear-gradient(to right, color-mix(in srgb, var(--row-fill) 0%, transparent), var(--row-fill)); }
 .twisty { display: inline-grid; place-items: center; width: 14px; color: var(--color-ink-3); transition: transform 0.12s; }
 .twisty.is-open { transform: rotate(90deg); }
 .twisty.is-empty { visibility: hidden; }
@@ -382,7 +410,8 @@ kbd { font: 11px var(--font-mono); color: var(--color-ink-3); background: var(--
 .preview-picking { position: absolute; outline: 1.5px dashed var(--color-accent); outline-offset: -1.5px; pointer-events: none; z-index: 2; }
 .preview-picking-name { position: absolute; left: -2px; bottom: 100%; margin-bottom: 3px; padding: 0 6px; border-radius: 4px; background: var(--color-accent); color: var(--color-on-accent); font-size: 10px; font-weight: 500; white-space: nowrap; line-height: 16px; }
 .preview-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 6px 10px; border-top: 1px solid var(--color-line); }
-.preview-hint { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 6px; font-size: 12px; color: var(--color-ink-3); }
+/* One line that ends in "…" when the panel is narrow, rather than wrapping beside the controls. */
+.preview-hint { display: inline-block; min-width: 0; height: 24px; line-height: 24px; padding: 0 8px; border-radius: 6px; font-size: 12px; color: var(--color-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .preview-hint kbd { margin-left: 0; }
 .dialog.shortcuts { width: min(760px, calc(100vw - 48px)); max-height: calc(100vh - 96px); overflow: auto; }
 .shortcuts .dialog-title svg { color: var(--color-ink-3); }
@@ -530,6 +559,9 @@ kbd { font: 11px var(--font-mono); color: var(--color-ink-3); background: var(--
   .presence[data-state="closed"] > .scrim > .dialog { scale: none; }
   .btn:active:not(:disabled), .icon-btn:active:not(:disabled) { transform: none; }
   .toast, .dialog { animation-name: fade-in; }
+  /* Agent highlights show, then go without fading; the cursor jumps instead of gliding. */
+  .ov-flash, .layer-flash { animation: none; }
+  .agent-cursor { transition: none; animation: none; }
 }
 
 /* Shown instead of the light/dark switch when the app's CSS has no dark tokens. */

@@ -1,13 +1,16 @@
 import {
   formatDesignFile,
+  allNodes,
   isDesignFile,
   listDesignFiles,
+  loadComments,
   loadConfig,
   readDesignFile,
   saveDesignFile,
   stableStringify,
   summarize,
   toRepoPath,
+  validateComments,
   validateProject,
 } from "@lamsa/core";
 import { openWorkspace, resolveRoot } from "../context.js";
@@ -21,7 +24,12 @@ export async function validateCommand({
   files: string[];
 }): Promise<number> {
   const workspace = await openWorkspace();
-  const all = validateProject({ project: workspace.project, tokens: workspace.tokens });
+  const comments = await loadComments({ root: workspace.project.root, config: workspace.project.config });
+  const all = [
+    ...validateProject({ project: workspace.project, tokens: workspace.tokens }),
+    ...comments.issues,
+    ...validateComments({ threads: comments.threads, nodes: allNodes(workspace.project) }),
+  ];
   const wanted = new Set(files.map((f) => toRepoPath(workspace.project.root, f)));
   const issues = wanted.size > 0 ? all.filter((i) => !i.file || wanted.has(i.file)) : all;
   const counts = summarize(issues);

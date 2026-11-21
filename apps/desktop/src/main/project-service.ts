@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import {
+  ACTIVITY_FILE,
   CONFIG_FILE,
   fontSetup,
   formatFileCss,
@@ -9,6 +10,7 @@ import {
   readDesignFile,
   listDesignFiles,
   loadProject,
+  readActivity,
   loadTokens,
   lucideIconSvg,
   readSession,
@@ -16,11 +18,14 @@ import {
   stableStringify,
   validateProject,
   writeSession,
+  type Activity,
   type Project,
 } from "@lamsa/core";
 import { FORMAT_VERSION, SCHEMA_URL, emptyTokenSet, type DesignFile, type DesignNode, type TokenSet } from "@lamsa/schema";
 import chokidar, { type FSWatcher } from "chokidar";
 import { isCssChange, type AddFilesResult, type Change, type ExternalChange, type FileState, type ProjectIssue, type ProjectSnapshot } from "../shared/api.js";
+
+const ACTIVITY_FRESH_MS = 10_000;
 
 function parseDesign(text: string): { nodes?: Record<string, DesignNode>; css?: string; error?: string } {
   try {
@@ -42,6 +47,7 @@ export class ProjectService {
   /** Text we last wrote per file, to ignore our own watcher echoes. */
   private written = new Map<string, string>();
   private watcher?: FSWatcher;
+  private activityWatcher?: FSWatcher;
   private queue: Promise<unknown> = Promise.resolve();
   /** Files shown in the editor; null until the user picks them. Saved in the session file. */
   private open: string[] | null = null;
@@ -53,6 +59,8 @@ export class ProjectService {
     private readonly events: {
       external: (change: ExternalChange) => void;
       reloaded: (snapshot: ProjectSnapshot) => void;
+      /** The CLI reported a command (`.lamsa/activity.json`), so the editor can show where the agent is working. */
+      activity?: (activity: Activity) => void;
     },
   ) {}
 
@@ -76,6 +84,7 @@ export class ProjectService {
     this.open = open ?? (this.files.size <= 1 ? [...this.files.keys()] : null);
     this.primeHistory();
     this.watch();
+    await this.watchActivity();
     if (file) await this.addFiles([file]);
     return this.snapshot();
   }
@@ -147,6 +156,8 @@ export class ProjectService {
   async close(): Promise<void> {
     await this.watcher?.close();
     this.watcher = undefined;
+    await this.activityWatcher?.close();
+    this.activityWatcher = undefined;
     this.project = undefined;
     this.files.clear();
     this.written.clear();
@@ -238,6 +249,25 @@ export class ProjectService {
       this.queue = this.queue.then(() => this.handleDiskChange(path)).catch(() => {});
     };
     this.watcher.on("add", onChange).on("change", onChange).on("unlink", onChange);
+  }
+
+  /**
+   * The CLI only reports activity in projects that have a `.lamsa/` folder, so it's created here. Entries older than
+   * ACTIVITY_FRESH_MS are left alone: they're from before this window was watching.
+   */
+  private async watchActivity() {
+    const root = this.require().root;
+    const dir = join(root, ".lamsa");
+    await mkdir(dir, { recursive: true }).catch(() => {});
+    const target = join(root, ACTIVITY_FILE);
+    this.activityWatcher = chokidar.watch(dir, { ignoreInitial: true, depth: 0, ignored: (path) => path !== dir && path !== target });
+    const onChange = async () => {
+      const activity = await readActivity(root);
+      if (!activity || this.project?.root !== root) return;
+      if (Date.now() - Date.parse(activity.at) > ACTIVITY_FRESH_MS) return;
+      this.events.activity?.(activity);
+    };
+    this.activityWatcher.on("add", onChange).on("change", onChange);
   }
 
   private async handleDiskChange(absolute: string) {

@@ -1,4 +1,4 @@
-import { Clapperboard, Component, Files, Layers, SlidersHorizontal, Sparkles, type LucideIcon } from "lucide-react";
+import { Clapperboard, Component, Files, Layers, MessageCircle, SlidersHorizontal, Sparkles, type LucideIcon } from "lucide-react";
 import type { ComponentType } from "react";
 import { PANEL_IDS, type PanelId } from "../lib/layout";
 import { shortcut } from "../lib/keys";
@@ -6,6 +6,7 @@ import type { EditorState } from "../lib/store";
 import { ComponentsPanel, FilesPanel, LayersPanel } from "./LayersPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { AgentPanel } from "./AgentPanel";
+import { CommentsPanel } from "./CommentsPanel";
 import { PreviewPanel } from "./PreviewPanel";
 
 export interface PanelDefinition {
@@ -36,7 +37,14 @@ export const PANELS: Record<PanelId, PanelDefinition> = {
   components: { id: "components", title: "Components", icon: Component, Body: ComponentsPanel },
   properties: { id: "properties", title: "Properties", icon: SlidersHorizontal, Body: PropertiesPanel },
   preview: { id: "preview", title: "Preview", icon: Clapperboard, Body: PreviewPanel },
+  comments: {
+    id: "comments",
+    title: "Comments",
+    icon: MessageCircle,
+    Body: CommentsPanel,
+    badge: { count: (state) => state.comments.filter((thread) => !thread.resolved).length, describe: (count) => `${count} open` },
+  },
 };
 
-/** Mod+1 … Mod+6 open the panels in registry order. */
+/** Mod+1 … Mod+7 open the panels in registry order. */
 export const panelShortcut = (panel: PanelId) => shortcut(`mod+${PANEL_IDS.indexOf(panel) + 1}`);

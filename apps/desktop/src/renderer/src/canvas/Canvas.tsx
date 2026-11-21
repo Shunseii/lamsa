@@ -7,6 +7,9 @@ import { ancestorsOf, baseId, childrenOf, fileRegions, isComponent, isLocked, no
 import { shortcut } from "../lib/keys";
 import { firstOpenFile, useEditor } from "../lib/store";
 import { AddFileMenu } from "../panels/AddFileMenu";
+import { AgentCursor } from "./AgentCursor";
+import { CommentLayer } from "./CommentLayer";
+import { startCommentAt, useComments } from "../lib/comments";
 import { findElement, FrameView, shadowRoots } from "./FrameView";
 import { cn } from "../lib/cn";
 
@@ -120,6 +123,7 @@ export const Canvas = memo(function Canvas() {
     renderVersion,
     editingText,
     flash,
+    agentCursor,
     previewProps,
   } = useEditor(
     useShallow((s) => ({
@@ -134,6 +138,7 @@ export const Canvas = memo(function Canvas() {
       renderVersion: s.renderVersion,
       editingText: s.editingText,
       flash: s.flash,
+      agentCursor: s.agentCursor,
       previewProps: s.previewProps,
     })),
   );
@@ -393,6 +398,13 @@ export const Canvas = memo(function Canvas() {
 
     const displayId = hitTest(e.clientX, e.clientY);
 
+    if (tool === "comment") {
+      const id = displayId ? selectableId(displayId, e.ctrlKey || e.metaKey) : null;
+      if (id) startCommentAt({ nodeId: id, clientX: e.clientX, clientY: e.clientY });
+      else useComments.getState().setDraft(null);
+      return;
+    }
+
     if (tool === "frame" || tool === "rect") {
       const world = toWorld(e.clientX, e.clientY);
       setDrag({ kind: "draw", start: world, current: world, parentId: deepestFrameAt(displayId), tool });
@@ -535,7 +547,7 @@ export const Canvas = memo(function Canvas() {
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (!drag) {
-      if (tool === "select" && !editingText) {
+      if ((tool === "select" || tool === "comment") && !editingText) {
         const id = hitTest(e.clientX, e.clientY);
         const next = id ? selectableId(id, e.ctrlKey || e.metaKey) : null;
         if (next !== hover) store().setHover(next);
@@ -767,7 +779,7 @@ export const Canvas = memo(function Canvas() {
   };
 
   const cursor =
-    drag?.kind === "pan" || tool === "hand" || space ? (drag?.kind === "pan" ? "grabbing" : "grab") : tool === "frame" || tool === "rect" ? "crosshair" : tool === "text" ? "text" : "default";
+    drag?.kind === "pan" || tool === "hand" || space ? (drag?.kind === "pan" ? "grabbing" : "grab") : tool === "frame" || tool === "rect" || tool === "comment" ? "crosshair" : tool === "text" ? "text" : "default";
 
   const frameOffset = (id: string) => {
     if (drag?.kind === "move-roots" && drag.ids.includes(id)) return drag.delta;
@@ -788,11 +800,14 @@ export const Canvas = memo(function Canvas() {
     const rect = screenRect(hover);
     if (rect) overlay.push(<div key="hover" className="ov-hover" style={rectStyle(rect)} />);
   }
+  const now = Date.now();
   for (const [id, until] of Object.entries(flash)) {
-    if (until < Date.now()) continue;
+    if (until <= now) continue;
     const rect = screenRect(id);
-    if (rect) overlay.push(<div key={`flash-${id}`} className="ov-flash" style={rectStyle(rect)} />);
+    // Keyed by when it ends, so a layer changed again restarts its fade instead of stacking a second outline.
+    if (rect) overlay.push(<div key={`flash-${id}-${until}`} className="ov-flash" data-flash-id={id} style={rectStyle(rect)} />);
   }
+  const agentTarget = agentCursor ? agentTargetOf(agentCursor.ids, screenRect, viewport) : null;
   for (const [id, rect] of selectionRects) {
     if (!rect) continue;
     let shown = rect;
@@ -952,6 +967,12 @@ export const Canvas = memo(function Canvas() {
         })}
       </div>
       <div className="overlay">{overlay}</div>
+      <CommentLayer />
+      {agentCursor && (
+        <div className="world agent-layer" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})` }}>
+          <AgentCursor cursor={agentCursor} target={agentTarget} zoom={viewport.zoom} />
+        </div>
+      )}
       {model.roots.length === 0 && <EmptyCanvas />}
     </div>
   );
@@ -1017,6 +1038,19 @@ function normalise(a: { x: number; y: number }, b: { x: number; y: number }, box
     w: Math.abs(a.x - b.x),
     h: Math.abs(a.y - b.y),
   };
+}
+
+/** Where the agent's cursor points, in world space: just inside the top-left of the first of `ids` that's rendered. */
+function agentTargetOf(ids: string[], screenRect: (id: string) => Rect | null, viewport: { x: number; y: number; zoom: number }) {
+  for (const id of ids) {
+    const rect = screenRect(id);
+    if (!rect) continue;
+    // The tip touches the layer's right edge, so the label beside it never covers what the agent is working on.
+    const x = rect.x + rect.w - 2;
+    const y = rect.y + Math.min(rect.h / 2, 10);
+    return { id, x: (x - viewport.x) / viewport.zoom, y: (y - viewport.y) / viewport.zoom };
+  }
+  return null;
 }
 
 function rectStyle(rect: Rect): React.CSSProperties {

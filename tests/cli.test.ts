@@ -107,3 +107,53 @@ describe("lamsa CLI (agent loop, no editor)", () => {
     expect(JSON.stringify(missing.json)).toContain("nope1234");
   });
 });
+
+describe("lamsa CLI activity for the editor", () => {
+  const readActivityFile = (root: string) => JSON.parse(readFileSync(join(root, ".lamsa/activity.json"), "utf8")) as Record<string, unknown>;
+  const asAgent = (name: string) => ({ LAMSA_AGENT_NAME: name, CLAUDECODE: "" });
+
+  it("records nothing in a project the editor has never used", () => {
+    const root = tempRepo({ "app/globals.css": GLOBALS_CSS });
+    expect(lamsa(root, "init", "--yes").code).toBe(0);
+    const added = lamsaWith({ cwd: root, args: ["add", "--file", "designs/a.lamsa.json", "--tree", JSON.stringify({ type: "frame", name: "A" })], env: asAgent("Tester") });
+    expect(added.code).toBe(0);
+    expect(existsSync(join(root, ".lamsa/activity.json"))).toBe(false);
+  });
+
+  it("records what each write and targeted read touched, newest entry winning", () => {
+    const root = tempRepo({ "app/globals.css": GLOBALS_CSS, ".lamsa/session.json": { selection: [] } });
+    expect(lamsa(root, "init", "--yes").code).toBe(0);
+    const env = asAgent("Tester");
+    const added = lamsaWith({
+      cwd: root,
+      args: ["add", "--file", "designs/a.lamsa.json", "--tree", JSON.stringify({ type: "frame", name: "A", children: [{ type: "text", content: "Hi" }] })],
+      env,
+    });
+    const [frameId] = added.json.rootIds as string[];
+    const [, textId] = added.json.created as string[];
+    expect(readActivityFile(root)).toMatchObject({ agent: "Tester", command: "add", kind: "write", ids: [frameId], file: "designs/a.lamsa.json" });
+
+    lamsaWith({ cwd: root, args: ["tree", textId!], env });
+    expect(readActivityFile(root)).toMatchObject({ command: "tree", kind: "read", ids: [textId], file: "designs/a.lamsa.json" });
+
+    // A whole-project read points at nothing in particular, so the last entry stays.
+    lamsaWith({ cwd: root, args: ["tree"], env });
+    expect(readActivityFile(root)).toMatchObject({ command: "tree", ids: [textId] });
+
+    lamsaWith({ cwd: root, args: ["delete", textId!], env });
+    expect(readActivityFile(root)).toMatchObject({ command: "delete", kind: "write", ids: [frameId] });
+  });
+
+  it("names the agent from LAMSA_AGENT_NAME, then Claude Code's environment, else Agent", () => {
+    const root = tempRepo({ "app/globals.css": GLOBALS_CSS, ".lamsa/session.json": { selection: [] } });
+    expect(lamsa(root, "init", "--yes").code).toBe(0);
+    const add = (env: NodeJS.ProcessEnv) =>
+      lamsaWith({ cwd: root, args: ["add", "--file", "designs/a.lamsa.json", "--tree", JSON.stringify({ type: "frame", name: "A" })], env });
+    add({ LAMSA_AGENT_NAME: "", CLAUDECODE: "1" });
+    expect(readActivityFile(root).agent).toBe("Claude");
+    add({ LAMSA_AGENT_NAME: "Codex", CLAUDECODE: "1" });
+    expect(readActivityFile(root).agent).toBe("Codex");
+    add({ LAMSA_AGENT_NAME: "", CLAUDECODE: "" });
+    expect(readActivityFile(root).agent).toBe("Agent");
+  });
+});

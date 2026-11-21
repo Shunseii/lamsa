@@ -23,6 +23,7 @@ const GROUPS: Group[] = [
       ["Rectangle", "R"],
       ["Image", "I"],
       ["Component", "C"],
+      ["Comment", "M"],
     ],
   },
   {
@@ -55,7 +56,7 @@ const GROUPS: Group[] = [
       ["Left panel", shortcut("mod+[")],
       ["Right panel", shortcut("mod+]")],
       ["Bottom panel", shortcut("mod+'")],
-      ["Show a panel", `${shortcut("mod+1")} … ${shortcut("mod+6")}`],
+      ["Show a panel", `${shortcut("mod+1")} … ${shortcut("mod+7")}`],
       ["Reset panel layout", shortcut("mod+alt+0")],
       ["Focus mode", shortcut("mod+\\")],
       ["Continue the agent chat in your terminal", shortcut("mod+j")],

@@ -166,12 +166,48 @@ export const configSchema = z
       )
       .default({}),
     assetsDir: z.string().default("designs/assets"),
+    /** Where comment threads live, one JSON file per thread. Committed with the designs. */
+    commentsDir: z.string().default("designs/comments"),
     agent: z
       .object({ command: z.string().default("claude"), args: z.array(z.string()).default([]) })
       .strict()
       .default({ command: "claude", args: [] }),
   })
   .strict();
+
+export const COMMENT_FORMAT_VERSION = 1;
+
+export const commentMessageSchema = z
+  .object({
+    author: z.string().min(1),
+    createdAt: z.iso.datetime({ offset: true }),
+    text: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * One comment thread, stored as `<commentsDir>/<id>.json`. It pins to a node by ID; `offset` is a point inside the
+ * node's box in its own unscaled pixels (the top-right corner when missing).
+ */
+export const commentThreadSchema = z
+  .object({
+    version: z.number().int().positive(),
+    nodeId: nodeIdSchema,
+    offset: z.object({ x: z.number(), y: z.number() }).strict().optional(),
+    ...commentMessageSchema.shape,
+    replies: z.array(commentMessageSchema).default([]),
+    resolved: z.object({ author: z.string().min(1), at: z.iso.datetime({ offset: true }) }).strict().optional(),
+  })
+  .strict();
+
+export type CommentMessage = z.infer<typeof commentMessageSchema>;
+export type CommentThreadFile = z.infer<typeof commentThreadSchema>;
+
+/** A thread as loaded: its file's contents plus its ID (the file name) and repo-relative path. */
+export interface CommentThread extends CommentThreadFile {
+  id: string;
+  path: string;
+}
 
 export type NodeId = z.infer<typeof nodeIdSchema>;
 export type Style = z.infer<typeof styleSchema>;

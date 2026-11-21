@@ -1,7 +1,8 @@
-import type { TokenMode, TokenSet } from "@lamsa/schema";
+import type { CommentThread, TokenMode, TokenSet } from "@lamsa/schema";
 import { create } from "zustand";
 import {
   isCssChange,
+  type AgentActivity,
   type Change,
   type ExternalChange,
   type FileState,
@@ -9,7 +10,8 @@ import {
   type ProjectIssue,
   type ProjectSnapshot,
 } from "../../../shared/api";
-import { buildModel, iconNamesIn, type Model } from "./model";
+import { changeHighlights, HIGHLIGHT_MS } from "./highlights";
+import { buildModel, iconNamesIn, rootOf, type Model } from "./model";
 import { activatePanel, DEFAULT_LAYOUT, dockOf, initialShown, movePanel, readLayout, resizeDock, writeLayout, type DockId, type DockShown, type PanelId, type PanelLayout } from "./layout";
 
 declare global {
@@ -20,7 +22,7 @@ declare global {
 
 export const api = (): LamsaApi => window.lamsa;
 
-export type Tool = "select" | "hand" | "frame" | "rect" | "text" | "image" | "icon" | "component";
+export type Tool = "select" | "hand" | "frame" | "rect" | "text" | "image" | "icon" | "component" | "comment";
 
 export interface Viewport {
   x: number;
@@ -36,6 +38,16 @@ export interface Toast {
   action?: { label: string; run: () => void };
   /** Stays until dismissed or removed by the code that raised it, instead of timing out. */
   sticky?: boolean;
+}
+
+/** Where the agent is working: a labelled cursor on the canvas, at the first of `ids` that's on screen. */
+export interface AgentCursor {
+  name: string;
+  /** Writes draw the cursor solid; reads (the agent looking at layers) draw it faint. */
+  kind: "read" | "write";
+  ids: string[];
+  /** When it last moved; each move restarts its linger. */
+  at: number;
 }
 
 interface HistoryEntry {
@@ -66,7 +78,9 @@ export interface EditorState {
   /** Why the last save failed; cleared by the next save that succeeds. */
   lastError?: string;
   toasts: Toast[];
+  /** Layers an agent just changed on disk, each with when its highlight ends (the restart key for its fade). */
   flash: Record<string, number>;
+  agentCursor: AgentCursor | null;
   icons: Record<string, string>;
   editingText: string | null;
   picker: boolean;
@@ -80,6 +94,8 @@ export interface EditorState {
   previewReturn: { dock: DockId; shown: boolean; active: PanelId | null } | null;
   /** The keyboard shortcuts sheet. */
   help: boolean;
+  /** The project's comment threads, oldest first (lib/comments.ts keeps them in sync with disk). */
+  comments: CommentThread[];
   /** Design files shown in the editor; null until the user picks them (the first-open prompt shows). */
   openFiles: string[] | null;
 }
@@ -91,6 +107,8 @@ interface EditorActions {
   undo(): void;
   redo(): void;
   applyExternal(change: ExternalChange): void;
+  /** A CLI command the agent ran: moves its cursor to the layers it read or wrote. */
+  noteAgentActivity(activity: AgentActivity): void;
   select(ids: string[]): void;
   setHover(id: string | null): void;
   setTool(tool: Tool): void;
@@ -131,6 +149,10 @@ interface EditorActions {
 }
 
 let toastId = 0;
+/** The name from the agent's latest CLI command, so changes it makes by editing JSON directly carry it too. */
+let lastAgent: { name: string; at: number } | undefined;
+const AGENT_NAME_FRESH_MS = 30_000;
+let flashTimer: ReturnType<typeof setTimeout> | undefined;
 let saveErrorToast: number | undefined;
 let selectionTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -236,6 +258,7 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
     redoStack: [],
     toasts: [],
     flash: {},
+    agentCursor: null,
     icons: {},
     editingText: null,
     picker: false,
@@ -245,6 +268,7 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
     previewFullscreen: false,
     previewReturn: null,
     help: false,
+    comments: [],
     openFiles: null,
 
     loadSnapshot(snapshot) {
@@ -283,7 +307,7 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
       const snapshot = await api().openProject(target);
       // The project opened in a window of its own; this one keeps its project.
       if (!snapshot) return false;
-      set({ selection: [], hover: null, preview: null, picker: false, contextMenu: null });
+      set({ selection: [], hover: null, preview: null, picker: false, contextMenu: null, flash: {}, agentCursor: null });
       reportSave(undefined);
       get().loadSnapshot(snapshot);
       return true;
@@ -291,7 +315,7 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
 
     async goHome() {
       await api().closeProject();
-      set({ selection: [], hover: null, preview: null, picker: false, contextMenu: null, undoStack: [], redoStack: [] });
+      set({ selection: [], hover: null, preview: null, picker: false, contextMenu: null, flash: {}, agentCursor: null, undoStack: [], redoStack: [] });
       reportSave(undefined);
       get().showWelcome();
     },
@@ -356,9 +380,10 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
       const touched = new Set(change.changedIds);
       const cssChanged = (get().files[change.path]?.css ?? "") !== (change.file.css ?? "");
       const keep = (entry: HistoryEntry) => !entry.changes.some((c) => (isCssChange(c) ? cssChanged && c.file === change.path : touched.has(c.id)));
-      const now = Date.now();
+      const highlights = changeHighlights({ model, previous: get().model, changedIds: change.changedIds });
+      const until = Date.now() + HIGHLIGHT_MS;
       const flash = { ...get().flash };
-      for (const id of change.changedIds) if (model.nodes[id]) flash[id] = now + 1600;
+      for (const id of highlights) flash[id] = until;
       set((s) => ({
         files,
         model,
@@ -382,13 +407,37 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
           tone: "neutral",
           title: `${change.path.split("/").pop()} changed on disk`,
           message: `${change.changedIds.length} node${change.changedIds.length === 1 ? "" : "s"} updated live`,
+          ...(highlights.length ? { action: { label: "Show changes", run: () => void import("./viewport").then(({ fitTo }) => fitTo(highlights)) } } : {}),
         });
       }
-      setTimeout(() => {
-        const current = { ...get().flash };
-        for (const [id, until] of Object.entries(current)) if (until <= Date.now()) delete current[id];
-        set({ flash: current });
-      }, 1700);
+      if (highlights.length) {
+        const name = change.agent ?? (lastAgent && Date.now() - lastAgent.at < AGENT_NAME_FRESH_MS ? lastAgent.name : "Agent");
+        set({ agentCursor: { name, kind: "write", ids: highlights, at: Date.now() } });
+      }
+      clearTimeout(flashTimer);
+      const expire = () => {
+        const now = Date.now();
+        const current = get().flash;
+        const live = Object.entries(current).filter(([, end]) => end > now);
+        if (live.length !== Object.keys(current).length) set({ flash: Object.fromEntries(live) });
+        if (live.length) flashTimer = setTimeout(expire, Math.min(...live.map(([, end]) => end)) - now + 20);
+      };
+      flashTimer = setTimeout(expire, HIGHLIGHT_MS + 20);
+    },
+
+    noteAgentActivity(activity) {
+      lastAgent = { name: activity.agent, at: Date.now() };
+      const { model } = get();
+      const shown = new Set(model.roots);
+      let ids = activity.ids.filter((id) => model.nodes[id] && shown.has(rootOf(model, id)));
+      if (!ids.length && activity.file) ids = model.roots.filter((id) => model.fileOf.get(id) === activity.file).slice(0, 1);
+      // Writes whose layers haven't arrived yet keep the cursor where it is; the file change moves it.
+      if (!ids.length) {
+        const cursor = get().agentCursor;
+        if (cursor && cursor.name !== activity.agent) set({ agentCursor: { ...cursor, name: activity.agent } });
+        return;
+      }
+      set({ agentCursor: { name: activity.agent, kind: activity.kind, ids, at: Date.now() } });
     },
 
     select(ids) {

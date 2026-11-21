@@ -161,14 +161,28 @@ export async function measureSize(size: number): Promise<Record<string, Sample>>
       return sample;
     });
 
+    // Fitted to everything, frames are too small to show labels (they hide when cramped), so zoom to one frame for the drag and fit again after.
+    await page.locator('[data-testid="layers-panel"] .layer-row').first().click();
+    await page.keyboard.press("Shift+Digit2");
+    await page.waitForTimeout(300);
     results["drag frame"] = await repeat(RUNS, async () => {
       const target = await page.evaluate(() => {
         for (const label of document.querySelectorAll<HTMLElement>(".frame-label")) {
           const box = label.getBoundingClientRect();
           const point = { x: box.left + 8, y: box.top + box.height / 2 };
-          if (document.elementFromPoint(point.x, point.y) === label) return { id: label.dataset.labelFor!, point };
+          const hit = document.elementFromPoint(point.x, point.y);
+          // The name sits in a child span; the play button is a separate control, so it doesn't count.
+          if (hit && label.contains(hit) && !hit.closest(".frame-label-play")) return { id: label.dataset.labelFor!, point };
         }
-        throw new Error("no frame label is under the pointer");
+        const labels = [...document.querySelectorAll<HTMLElement>(".frame-label")].slice(0, 3).map((label) => {
+          const box = label.getBoundingClientRect();
+          const hit = document.elementFromPoint(box.left + 8, box.top + box.height / 2);
+          return `${Math.round(box.left)},${Math.round(box.top)} ${Math.round(box.width)}x${Math.round(box.height)} hit=${hit?.className || hit?.tagName}`;
+        });
+        const all = [...document.querySelectorAll<HTMLElement>(".frame-label")];
+        const visible = all.filter((label) => getComputedStyle(label).visibility === "visible");
+        const zoom = document.querySelector(".zoom button")?.textContent;
+        throw new Error(`no frame label is under the pointer (${all.length} labels, ${visible.length} visible, zoom ${zoom}; ${labels.join(" | ")})`);
       });
       const from = target.point;
       const draggedRoot = target.id;
@@ -185,6 +199,8 @@ export async function measureSize(size: number): Promise<Record<string, Sample>>
       await page.waitForTimeout(300);
       return sample;
     });
+    await page.keyboard.press("Shift+Digit1");
+    await page.waitForTimeout(300);
 
     const search = page.locator('[data-testid="layers-panel"] .search input');
     results["type in search"] = await repeat(RUNS, async () => {
@@ -195,6 +211,31 @@ export async function measureSize(size: number): Promise<Record<string, Sample>>
       });
       await search.fill("");
       await page.waitForTimeout(500);
+      return sample;
+    });
+
+    const collapseAll = page.locator('[data-testid="collapse-all"]');
+    const collapseLabel = (label: string) => `document.querySelector('[data-testid="collapse-all"]').getAttribute("aria-label") === ${JSON.stringify(label)}`;
+    results["collapse all layers"] = await repeat(RUNS, async () => {
+      const sample = await measure(page, { act: () => collapseAll.click(), ready: collapseLabel("Expand all layers") });
+      await measure(page, { act: () => collapseAll.click(), ready: collapseLabel("Collapse all layers") });
+      await page.waitForTimeout(300);
+      return sample;
+    });
+    results["expand all layers"] = await repeat(RUNS, async () => {
+      await measure(page, { act: () => collapseAll.click(), ready: collapseLabel("Expand all layers") });
+      await page.waitForTimeout(300);
+      const sample = await measure(page, { act: () => collapseAll.click(), ready: collapseLabel("Collapse all layers") });
+      await page.waitForTimeout(300);
+      return sample;
+    });
+    const firstRow = page.locator('[data-testid="layers-panel"] .layer-row').first();
+    const firstRowId = await firstRow.getAttribute("data-layer-id");
+    const firstRowOpen = `document.querySelector('.layer-row[data-layer-id="${firstRowId}"] .twisty').classList.contains("is-open")`;
+    results["alt-click twisty (close subtree)"] = await repeat(RUNS, async () => {
+      const sample = await measure(page, { act: () => firstRow.locator(".twisty").click({ modifiers: ["Alt"] }), ready: `!${firstRowOpen}` });
+      await measure(page, { act: () => firstRow.locator(".twisty").click({ modifiers: ["Alt"] }), ready: firstRowOpen });
+      await page.waitForTimeout(300);
       return sample;
     });
 
@@ -209,6 +250,22 @@ export async function measureSize(size: number): Promise<Record<string, Sample>>
         ready: `document.querySelector('[data-label-for="${firstRoot}"]')?.textContent.includes(${JSON.stringify(name)})`,
       });
       await page.waitForTimeout(2000);
+      return sample;
+    });
+
+    let rewrite = 0;
+    results["agent rewrite of a whole file (to highlights)"] = await repeat(RUNS, async () => {
+      const path = join(root, "designs/stress-1.lamsa.json");
+      const design = JSON.parse(readFileSync(path, "utf8")) as { nodes: Record<string, Record<string, unknown>> };
+      const pass = rewrite++;
+      for (const node of Object.values(design.nodes)) node.name = `${String(node.name ?? node.type).replace(/ \(pass \d+\)$/, "")} (pass ${pass})`;
+      await page.waitForTimeout(2500);
+      const sample = await measure(page, {
+        act: async () => writeFileSync(path, JSON.stringify(design, null, 2)),
+        ready: `document.querySelector('[data-label-for="${firstRoot}"]')?.textContent.includes("(pass ${pass})") && document.querySelector('.ov-flash[data-flash-id="${firstRoot}"]')`,
+      });
+      const highlights = await page.locator(".ov-flash").count();
+      if (highlights > 40) throw new Error(`a whole-file rewrite drew ${highlights} highlights`);
       return sample;
     });
   } finally {

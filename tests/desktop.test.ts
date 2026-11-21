@@ -984,6 +984,119 @@ describe("desktop editor selection and moving", () => {
   });
 });
 
+describe("desktop editor collapsing layers", () => {
+  const TOP_LEVEL = ["08JQi0tV", "Btn00001", "Inp00001"];
+  const SUMMARY = "ddPB6Wpj";
+  const SUMMARY_ROWS = ["LGEOBLsf", "RSj5HAWw"];
+  const SUBTOTAL = "d08HTIyf";
+  let collapseRoot: string;
+  let collapseApp: ElectronApplication;
+  let win: Page;
+  let everyRow: string[];
+  const layers = () => win.getByTestId("layers-panel");
+  const rows = () => win.$$eval('[data-testid="layers-panel"] .layer-row', (list) => list.map((row) => (row as HTMLElement).dataset.layerId));
+  const collapseAll = () => layers().getByTestId("collapse-all");
+  const twisty = (id: string) => layers().locator(`.layer-row[data-layer-id="${id}"] .twisty`);
+  const fileToggle = (path: string) => layers().getByRole("button", { name: new RegExp(`all layers in ${path}$`) });
+
+  beforeAll(async () => {
+    collapseRoot = mkdtempSync(join(tmpdir(), "lamsa-collapse-"));
+    copyExample(collapseRoot);
+    collapseApp = await _electron.launch({
+      executablePath: ELECTRON,
+      args: [DESKTOP, "--root", collapseRoot],
+      env: { ...process.env, LAMSA_HIDDEN: "1", LAMSA_MULTI_INSTANCE: "1" },
+    });
+    win = await collapseApp.firstWindow();
+    await layers().locator(".layer-row").first().waitFor();
+    everyRow = (await rows()) as string[];
+  }, 60_000);
+
+  afterAll(async () => {
+    await collapseApp?.close();
+  });
+
+  it("collapses every layer to the top-level frames and expands them all again", async () => {
+    expect(everyRow.length).toBeGreaterThan(TOP_LEVEL.length + 10);
+    await expect(collapseAll().getAttribute("aria-label")).resolves.toBe("Collapse all layers");
+    await collapseAll().click();
+    await expect.poll(rows).toEqual(TOP_LEVEL);
+    expect(await layers().locator(".layer-file-name").allTextContents()).toEqual(["checkout.lamsa.json", "components.lamsa.json"]);
+    expect(await layers().locator(".twisty.is-open").count()).toBe(0);
+    await expect(collapseAll().getAttribute("aria-label")).resolves.toBe("Expand all layers");
+    await expect(layers().locator(".search-row .tip").textContent()).resolves.toBe("Expand all layers");
+    // Keyboard: the button is a plain button, so focus and Enter work.
+    await collapseAll().focus();
+    await win.keyboard.press("Enter");
+    await expect.poll(rows).toEqual(everyRow);
+    await expect(collapseAll().getAttribute("aria-label")).resolves.toBe("Collapse all layers");
+  });
+
+  it("expands one file's layers from its header and leaves the other file collapsed", async () => {
+    await collapseAll().click();
+    await expect.poll(rows).toEqual(TOP_LEVEL);
+    const header = layers().locator('.layer-file[data-file="designs/components.lamsa.json"]');
+    await header.hover();
+    await fileToggle("designs/components.lamsa.json").click();
+    await expect.poll(rows).toEqual(["08JQi0tV", ...everyRow.slice(everyRow.indexOf("Btn00001"))]);
+    await expect(collapseAll().getAttribute("aria-label")).resolves.toBe("Collapse all layers");
+    await expect(fileToggle("designs/components.lamsa.json").getAttribute("aria-label")).resolves.toBe("Collapse all layers in designs/components.lamsa.json");
+    await expect(fileToggle("designs/checkout.lamsa.json").getAttribute("aria-label")).resolves.toBe("Expand all layers in designs/checkout.lamsa.json");
+    await fileToggle("designs/components.lamsa.json").click();
+    await expect.poll(rows).toEqual(TOP_LEVEL);
+    await collapseAll().click();
+    await expect.poll(rows).toEqual(everyRow);
+  });
+
+  it("opens or closes a layer and everything inside it with Alt-click on its twisty", async () => {
+    await twisty(SUMMARY).click({ modifiers: ["Alt"] });
+    await expect.poll(async () => (await rows()).includes(SUMMARY_ROWS[0]!)).toBe(false);
+    await twisty(SUMMARY).click();
+    await expect.poll(rows).toEqual(expect.arrayContaining(SUMMARY_ROWS));
+    expect(await rows()).not.toContain(SUBTOTAL);
+    await twisty(SUMMARY).click();
+    await expect.poll(async () => (await rows()).includes(SUMMARY_ROWS[0]!)).toBe(false);
+    await twisty(SUMMARY).click({ modifiers: ["Alt"] });
+    await expect.poll(rows).toEqual(everyRow);
+  });
+
+  it("still opens collapsed parents when a layer is selected on the canvas", async () => {
+    await collapseAll().click();
+    await expect.poll(rows).toEqual(TOP_LEVEL);
+    const point = await win.evaluate((id) => {
+      for (const host of document.querySelectorAll(".frame-host")) {
+        const element = host.shadowRoot?.querySelector(`[data-node-id="${id}"]`);
+        if (!element) continue;
+        const box = element.getBoundingClientRect();
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      }
+      throw new Error(`no element for ${id}`);
+    }, SUBTOTAL);
+    await win.keyboard.down("Control");
+    await win.mouse.click(point.x, point.y);
+    await win.keyboard.up("Control");
+    await layers().locator(`.layer-row.is-selected[data-layer-id="${SUBTOTAL}"]`).waitFor();
+    expect(await rows()).toEqual(expect.arrayContaining(["08JQi0tV", SUMMARY, "LGEOBLsf", SUBTOTAL]));
+    expect(await rows()).toContain("Rwwc3Sdq");
+    expect(await rows()).not.toContain("HjlWoojj");
+    await win.keyboard.press("Escape");
+    await win.keyboard.press("Escape");
+  });
+
+  it("keeps filter matches open and applies the buttons to the unfiltered tree", async () => {
+    await collapseAll().click();
+    await expect.poll(rows).toEqual(TOP_LEVEL);
+    const search = layers().locator(".search input");
+    await search.fill("Subtotal");
+    await expect.poll(rows).toEqual(["08JQi0tV", SUMMARY, "LGEOBLsf", SUBTOTAL]);
+    await collapseAll().click();
+    await expect.poll(() => collapseAll().getAttribute("aria-label")).toBe("Collapse all layers");
+    expect(await rows()).toEqual(["08JQi0tV", SUMMARY, "LGEOBLsf", SUBTOTAL]);
+    await search.fill("");
+    await expect.poll(rows).toEqual(everyRow);
+  });
+});
+
 describe("desktop editor animation preview", () => {
   let motionRoot: string;
   let motionApp: ElectronApplication;
@@ -1255,7 +1368,7 @@ describe("desktop editor open files", () => {
   let win: Page;
   const session = () => JSON.parse(readFileSync(join(filesRoot, ".lamsa/session.json"), "utf8")) as { open?: string[] };
   const shownRoots = () => win.evaluate(() => [...document.querySelectorAll(".frame-host")].map((host) => host.getAttribute("data-root-id")));
-  const fileHeaders = () => win.getByTestId("layers-panel").locator(".layer-file").allTextContents();
+  const fileHeaders = () => win.getByTestId("layers-panel").locator(".layer-file-name").allTextContents();
   const extra = (name: string, title: string) =>
     JSON.stringify({ version: 1, nodes: { [`${name}Frm1`]: { type: "frame", name: title, x: 2000, y: 0, style: { width: 200, height: 120, background: "{color.muted}" } } } });
 
@@ -1389,7 +1502,7 @@ describe("desktop editor open files", () => {
     try {
       const page = await other.firstWindow();
       await expect
-        .poll(() => page.getByTestId("layers-panel").locator(".layer-file").allTextContents())
+        .poll(() => page.getByTestId("layers-panel").locator(".layer-file-name").allTextContents())
         .toEqual(["checkout.lamsa.json", "components.lamsa.json"]);
       const selected = () => (JSON.parse(readFileSync(join(fresh, ".lamsa/session.json"), "utf8")) as { selection: string[] }).selection.slice().sort();
       await expect.poll(selected).toEqual(["Btn00001", "Inp00001", "QkpksTeC"]);
@@ -1419,7 +1532,7 @@ describe("desktop editor open files", () => {
       await empty.getByTestId("add-file").click();
       await page.getByTestId("add-file-menu").locator('[data-file="designs/checkout.lamsa.json"]').click();
       await empty.waitFor({ state: "detached" });
-      await expect.poll(() => page.getByTestId("layers-panel").locator(".layer-file").allTextContents()).toEqual(["checkout.lamsa.json"]);
+      await expect.poll(() => page.getByTestId("layers-panel").locator(".layer-file-name").allTextContents()).toEqual(["checkout.lamsa.json"]);
     } finally {
       await other.close();
     }
@@ -1478,7 +1591,7 @@ describe("desktop editor dockable panels", () => {
 
   it("draws the left panels as icon tabs, Agent first, with only the open tab's label and a tooltip on hover", async () => {
     expect(await tabsIn("left")).toEqual(["agent", "layers", "files", "components"]);
-    expect(await tabsIn("right")).toEqual(["properties"]);
+    expect(await tabsIn("right")).toEqual(["properties", "comments"]);
     await expect.poll(() => visibleTabLabels("left")).toEqual(["Layers"]);
     const files = win.locator('[data-panel-tab="files"]');
     const tip = files.locator("xpath=..").getByRole("tooltip");
@@ -1553,7 +1666,7 @@ describe("desktop editor dockable panels", () => {
 
   it("moves a tab from the left dock to the right one, and back again", async () => {
     await dragTab({ panel: "components", to: "right" });
-    expect(await tabsIn("right")).toEqual(["properties", "components"]);
+    expect(await tabsIn("right")).toEqual(["properties", "comments", "components"]);
     expect(await activeIn("right")).toBe("components");
     expect(await tabsIn("left")).toEqual(["agent", "layers", "files"]);
     await win.getByTestId("dock-right").getByTestId("components-panel").waitFor();
@@ -1562,15 +1675,16 @@ describe("desktop editor dockable panels", () => {
     const files = (await win.locator('[data-panel-tab="files"]').boundingBox())!;
     await dragTab({ panel: "components", to: { x: files.x + 2, y: files.y + files.height / 2 } });
     expect(await tabsIn("left")).toEqual(["agent", "layers", "components", "files"]);
-    expect(await tabsIn("right")).toEqual(["properties"]);
+    expect(await tabsIn("right")).toEqual(["properties", "comments"]);
   });
 
   it("collapses a dock that has no tabs left, and widens the canvas area into its place", async () => {
     // Toasts sit beside the right dock while it's open, so their right edge shows where the canvas area ends.
     const canvasAreaRight = () => win.getByTestId("toasts").evaluate((element) => Math.round(element.getBoundingClientRect().right));
     const before = await canvasAreaRight();
+    await dragTab({ panel: "comments", to: "left" });
     await dragTab({ panel: "properties", to: "left" });
-    expect(await tabsIn("left")).toEqual(["agent", "layers", "components", "files", "properties"]);
+    expect(await tabsIn("left")).toEqual(["agent", "layers", "components", "files", "comments", "properties"]);
     await win.getByTestId("dock-right").waitFor({ state: "detached" });
     expect(await win.getByTestId("toggle-right-dock").isDisabled()).toBe(true);
     await expect.poll(canvasAreaRight).toBeGreaterThan(before + 200);
@@ -1618,7 +1732,7 @@ describe("desktop editor dockable panels", () => {
     await win.reload();
     await win.getByTestId("dock-centre").getByTestId("layers-panel").waitFor();
     expect(await storedLayout()).toEqual(layout);
-    expect(await tabsIn("left")).toEqual(["agent", "components", "files", "properties"]);
+    expect(await tabsIn("left")).toEqual(["agent", "components", "files", "comments", "properties"]);
     expect(await height()).toBe(before + 50);
     expect(await win.getByTestId("dock-left").evaluate((element) => Math.round(element.getBoundingClientRect().width))).toBe(leftWidth);
   });
@@ -1646,7 +1760,7 @@ describe("desktop editor dockable panels", () => {
     await expect.poll(() => win.evaluate(() => document.activeElement?.getAttribute("data-panel-tab"))).toBe("files");
     expect(await activeIn("left")).toBe("files");
     await win.keyboard.press("ArrowRight");
-    expect(await activeIn("left")).toBe("agent");
+    expect(await activeIn("left")).toBe("comments");
     await win.keyboard.press("ArrowLeft");
     await win.keyboard.press("Shift+F10");
     await win.getByTestId("panel-tab-menu").locator('[data-dock-target="right"]').click();
@@ -1658,7 +1772,7 @@ describe("desktop editor dockable panels", () => {
     await win.getByTestId("project-menu").click();
     await win.getByTestId("reset-panel-layout").click();
     expect(await tabsIn("left")).toEqual(["agent", "layers", "files", "components"]);
-    expect(await tabsIn("right")).toEqual(["properties"]);
+    expect(await tabsIn("right")).toEqual(["properties", "comments"]);
     await win.getByTestId("dock-centre").waitFor({ state: "detached" });
     expect(await storedLayout()).toBeNull();
 
@@ -1848,7 +1962,8 @@ describe("desktop editor preview dock", () => {
       await win.getByTestId("dock-centre").waitFor();
       await moveTab({ panel: "components", to: "centre" });
       await moveTab({ panel: "files", to: "right" });
-    });
+      // Two tab drags; under a full parallel run they can take longer than the default 10 s.
+    }, 30_000);
 
     it.each(["left", "right", "centre"])("%s dock: icon tabs, only the open tab's label, tooltips, and a resize handle", async (dock) => {
       const container = win.getByTestId(`dock-${dock}`);
@@ -2118,5 +2233,154 @@ describe("desktop editor agent chat", () => {
       return Math.round(panel.width - box.width);
     });
     expect(narrow).toBeLessThanOrEqual(24);
+  });
+});
+
+describe("desktop editor agent changes and presence", () => {
+  let presenceRoot: string;
+  let presenceApp: ElectronApplication;
+  let win: Page;
+  const checkout = () => join(presenceRoot, "designs/checkout.lamsa.json");
+  const design = () => JSON.parse(readFileSync(checkout(), "utf8")) as { nodes: Record<string, Record<string, unknown>> };
+  const agent = (...args: string[]) => {
+    const result = spawnSync(process.execPath, [CLI, "--json", ...args], {
+      cwd: presenceRoot,
+      encoding: "utf8",
+      env: { ...process.env, LAMSA_AGENT_NAME: "Tester", CLAUDECODE: "" },
+    });
+    return JSON.parse(result.stdout || "{}") as Record<string, unknown>;
+  };
+  const flashOn = (id: string) => win.locator(`.ov-flash[data-flash-id="${id}"]`);
+  const rowFlashOn = (id: string) => win.locator(`.layer-row[data-layer-id="${id}"] .layer-flash`);
+  const cursor = () => win.getByTestId("agent-cursor");
+  const waitForQuiet = async () => {
+    await win.locator(".ov-flash").first().waitFor({ state: "detached", timeout: 8000 });
+    await cursor().waitFor({ state: "detached", timeout: 8000 });
+  };
+
+  beforeAll(async () => {
+    presenceRoot = mkdtempSync(join(tmpdir(), "lamsa-presence-"));
+    copyExample(presenceRoot);
+    presenceApp = await _electron.launch({
+      executablePath: ELECTRON,
+      args: [DESKTOP, "--root", presenceRoot],
+      env: { ...process.env, LAMSA_HIDDEN: "1", LAMSA_MULTI_INSTANCE: "1" },
+    });
+    win = await presenceApp.firstWindow();
+    await win.getByTestId("layers-panel").waitFor();
+    await win.waitForTimeout(400);
+  }, 60_000);
+
+  afterAll(async () => {
+    await presenceApp?.close();
+  });
+
+  it("highlights a layer the agent adds on the canvas and in the layers panel, with its cursor there, then fades both", async () => {
+    const added = agent("add", "--parent", "7qOxePB7", "--tree", JSON.stringify({ type: "text", name: "Agent line", content: "Added by the agent" }));
+    const [id] = added.rootIds as string[];
+    await flashOn(id!).waitFor({ timeout: 10_000 });
+    await rowFlashOn(id!).waitFor();
+    await win.getByTestId("toasts").getByRole("button", { name: "Show changes" }).first().waitFor();
+    const [flashBox, layerBox] = await win.evaluate((nodeId) => {
+      const flash = document.querySelector(`.ov-flash[data-flash-id="${nodeId}"]`)!.getBoundingClientRect();
+      const host = [...document.querySelectorAll(".frame-host")].map((h) => h.shadowRoot?.querySelector(`[data-node-id="${nodeId}"]`)).find(Boolean)!;
+      const layer = host.getBoundingClientRect();
+      return [flash, layer].map((r) => ({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }));
+    }, id!);
+    expect(flashBox).toEqual(layerBox);
+    // An overlay only: nothing about the highlight reaches the design.
+    expect(JSON.stringify(design().nodes[id!])).not.toMatch(/flash|highlight/);
+
+    await cursor().waitFor();
+    expect(await cursor().getAttribute("data-target")).toBe(id);
+    expect(await cursor().getAttribute("data-kind")).toBe("write");
+    expect(await cursor().textContent()).toBe("Tester");
+
+    await flashOn(id!).waitFor({ state: "detached", timeout: 4000 });
+    expect(await rowFlashOn(id!).count()).toBe(0);
+    await cursor().waitFor({ state: "detached", timeout: 6000 });
+  });
+
+  it("restarts the highlight when the agent changes the same layer again, without stacking a second one", async () => {
+    await waitForQuiet();
+    const data = design();
+    (data.nodes.LnRn8NkJ as { content?: string }).content = "First agent pass";
+    writeFileSync(checkout(), JSON.stringify(data, null, 2));
+    await flashOn("LnRn8NkJ").waitFor({ timeout: 10_000 });
+    await flashOn("LnRn8NkJ").evaluate((element) => element.setAttribute("data-first", ""));
+    await win.waitForTimeout(1200);
+    (data.nodes.LnRn8NkJ as { content?: string }).content = "Second agent pass";
+    writeFileSync(checkout(), JSON.stringify(data, null, 2));
+    await win.locator('.ov-flash[data-flash-id="LnRn8NkJ"]:not([data-first])').waitFor({ timeout: 10_000 });
+    expect(await flashOn("LnRn8NkJ").count()).toBe(1);
+    // Past when the first highlight would have ended, the restarted one is still there.
+    await win.waitForTimeout(1200);
+    expect(await flashOn("LnRn8NkJ").count()).toBe(1);
+  });
+
+  it("moves the cursor faintly to what the agent reads, without highlighting it", async () => {
+    await waitForQuiet();
+    agent("tree", "qrAB98yG");
+    await cursor().waitFor({ timeout: 10_000 });
+    expect(await cursor().getAttribute("data-kind")).toBe("read");
+    expect(await cursor().getAttribute("data-target")).toBe("qrAB98yG");
+    expect(await cursor().textContent()).toBe("Tester · reading");
+    expect(Number(await cursor().locator(".agent-cursor-arrow").evaluate((element) => getComputedStyle(element).opacity))).toBeLessThan(1);
+    // The label sits beside the layer, never over it.
+    const [label, layer] = await win.evaluate((nodeId) => {
+      const host = [...document.querySelectorAll(".frame-host")].map((h) => h.shadowRoot?.querySelector(`[data-node-id="${nodeId}"]`)).find(Boolean)!;
+      return [document.querySelector(".agent-cursor-label")!.getBoundingClientRect(), host.getBoundingClientRect()].map((r) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom }));
+    }, "qrAB98yG");
+    expect(label!.left).toBeGreaterThanOrEqual(layer!.right);
+    expect(await win.locator(".ov-flash").count()).toBe(0);
+  });
+
+  it("doesn't highlight the user's own edits or their undo", async () => {
+    await waitForQuiet();
+    await win.getByTestId("layers-panel").locator('.layer-row[data-layer-id="Rwwc3Sdq"]').click();
+    const gap = win.getByTestId("properties-panel").locator(".field", { hasText: /^gap/ }).locator("input").first();
+    await gap.fill("14");
+    await gap.press("Enter");
+    await expect.poll(() => design().nodes["Rwwc3Sdq"]?.style).toMatchObject({ gap: 14 });
+    await win.locator(".canvas").click({ position: { x: 700, y: 120 } }).catch(() => {});
+    await win.keyboard.press("Control+z");
+    await expect.poll(() => (design().nodes["Rwwc3Sdq"]?.style as Record<string, unknown>)?.gap).not.toBe(14);
+    await win.waitForTimeout(800);
+    expect(await win.locator(".ov-flash").count()).toBe(0);
+    expect(await win.locator(".layer-flash").count()).toBe(0);
+    expect(await cursor().count()).toBe(0);
+  });
+
+  it("shows a whole added subtree as one highlight, and merges a large rewrite to its frame", async () => {
+    await waitForQuiet();
+    const children = Array.from({ length: 60 }, (_, i) => ({ type: "text", name: `Line ${i}`, content: `Line ${i}` }));
+    const added = agent("add", "--parent", "7qOxePB7", "--tree", JSON.stringify({ type: "frame", name: "Agent list", children }));
+    const [listId] = added.rootIds as string[];
+    await flashOn(listId!).waitFor({ timeout: 10_000 });
+    expect(await win.locator(".ov-flash").count()).toBe(1);
+
+    await waitForQuiet();
+    const data = design();
+    for (const node of Object.values(data.nodes)) if (node.parentId === listId) node.content = `${node.content} (edited)`;
+    writeFileSync(checkout(), JSON.stringify(data, null, 2));
+    await flashOn("08JQi0tV").waitFor({ timeout: 10_000 });
+    expect(await win.locator(".ov-flash").count()).toBe(1);
+    expect(await cursor().getAttribute("data-target")).toBe("08JQi0tV");
+  });
+
+  it("shows and removes the highlight without fading when the system asks for reduced motion", async () => {
+    await waitForQuiet();
+    await win.emulateMedia({ reducedMotion: "reduce" });
+    try {
+      const data = design();
+      (data.nodes.LnRn8NkJ as { content?: string }).content = "Reduced motion pass";
+      writeFileSync(checkout(), JSON.stringify(data, null, 2));
+      await flashOn("LnRn8NkJ").waitFor({ timeout: 10_000 });
+      const style = await flashOn("LnRn8NkJ").evaluate((element) => ({ animation: getComputedStyle(element).animationName, opacity: getComputedStyle(element).opacity }));
+      expect(style).toEqual({ animation: "none", opacity: "1" });
+      await flashOn("LnRn8NkJ").waitFor({ state: "detached", timeout: 4000 });
+    } finally {
+      await win.emulateMedia({ reducedMotion: null });
+    }
   });
 });

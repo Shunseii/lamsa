@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron, type ElectronApplication, type Page } from "playwright-core";
@@ -10,6 +11,7 @@ const ELECTRON = join(DESKTOP, "node_modules/electron/dist/electron");
 
 let app: ElectronApplication;
 let page: Page;
+let stressRoot: string;
 
 /** Milliseconds from the shortcut until the frame after `ready` holds. */
 async function timeShortcut({ key, ready }: { key: string; ready: string }): Promise<number> {
@@ -29,10 +31,10 @@ async function timeShortcut({ key, ready }: { key: string; ready: string }): Pro
 
 describe("editor with a large project", () => {
   beforeAll(async () => {
-    const root = makeStressProject({ nodes: 10_000 });
+    stressRoot = makeStressProject({ nodes: 10_000 });
     app = await _electron.launch({
       executablePath: ELECTRON,
-      args: [DESKTOP, "--root", root],
+      args: [DESKTOP, "--root", stressRoot],
       env: { ...process.env, LAMSA_HIDDEN: "1", LAMSA_MULTI_INSTANCE: "1" },
     });
     page = await app.firstWindow();
@@ -54,6 +56,28 @@ describe("editor with a large project", () => {
     // Generous bounds: before the list was virtualised these took seconds at this size.
     expect(await timeShortcut({ key: "Control+BracketLeft", ready: `!${panel}` })).toBeLessThan(1000);
     expect(await timeShortcut({ key: "Control+BracketLeft", ready: `${panel}?.querySelector(".layer-row")` })).toBeLessThan(1000);
+  });
+
+  it("collapses and expands every layer quickly", async () => {
+    const button = page.getByTestId("collapse-all");
+    await button.waitFor();
+    // Clicked from inside the page, so the time is the editor's work and not the hidden window's slow test input.
+    const toggle = (label: string) =>
+      page.evaluate(async (label) => {
+        const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const start = performance.now();
+        document.querySelector<HTMLButtonElement>('[data-testid="collapse-all"]')!.click();
+        while (document.querySelector('[data-testid="collapse-all"]')?.getAttribute("aria-label") !== label) await frame();
+        await frame();
+        return performance.now() - start;
+      }, label);
+    const collapseMs = await toggle("Expand all layers");
+    const rows = await page.getByTestId("layers-panel").locator(".layer-row").count();
+    const expandMs = await toggle("Collapse all layers");
+    console.log(`collapse all: ${collapseMs.toFixed(0)} ms (${rows} top-level rows), expand all: ${expandMs.toFixed(0)} ms`);
+    expect(rows).toBeGreaterThan(0);
+    expect(collapseMs).toBeLessThan(500);
+    expect(expandMs).toBeLessThan(500);
   });
 
   it("drags a panel tab between docks without touching the canvas until the drop", async () => {
@@ -168,6 +192,36 @@ describe("editor with a large project", () => {
         }),
       )
       .toBeLessThan(2);
+  });
+
+  it("highlights a whole-file agent rewrite per top-level frame, capped, without stalling", async () => {
+    const path = join(stressRoot, "designs/stress-1.lamsa.json");
+    const design = JSON.parse(readFileSync(path, "utf8")) as { nodes: Record<string, { name?: string; type: string; parentId?: string }> };
+    for (const node of Object.values(design.nodes)) node.name = `${node.name ?? node.type} (agent)`;
+    const changed = Object.keys(design.nodes).length;
+    const firstRoot = Object.entries(design.nodes).find(([, node]) => node.parentId === undefined)![0];
+    await page.evaluate(() => {
+      const blocked: number[] = [];
+      const observer = new PerformanceObserver((list) => blocked.push(...list.getEntries().map((entry) => entry.duration)));
+      observer.observe({ type: "longtask" });
+      (window as unknown as { __rewrite: { start: number; blocked: number[]; observer: PerformanceObserver } }).__rewrite = { start: performance.now(), blocked, observer };
+    });
+    writeFileSync(path, JSON.stringify(design, null, 2));
+    const { ms, blocked } = await page.evaluate(async (id) => {
+      const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const state = (window as unknown as { __rewrite: { start: number; blocked: number[]; observer: PerformanceObserver } }).__rewrite;
+      while (!document.querySelector(`.ov-flash[data-flash-id="${id}"]`)) await frame();
+      await frame();
+      const elapsed = performance.now() - state.start;
+      state.blocked.push(...state.observer.takeRecords().map((entry) => entry.duration));
+      state.observer.disconnect();
+      return { ms: elapsed, blocked: state.blocked.reduce((sum, d) => sum + d, 0) };
+    }, firstRoot);
+    const flashes = await page.locator(".ov-flash").count();
+    console.log(`agent rewrite of ${changed} layers: highlighted in ${ms.toFixed(0)} ms (${blocked.toFixed(0)} ms long tasks), ${flashes} canvas highlights`);
+    expect(flashes).toBeGreaterThan(0);
+    expect(flashes).toBeLessThanOrEqual(40);
+    expect(ms).toBeLessThan(3000);
   });
 });
 

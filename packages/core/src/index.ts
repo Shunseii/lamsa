@@ -1,3 +1,5 @@
+export * from "./activity.js";
+export * from "./comments.js";
 export * from "./css.js";
 export * from "./diff.js";
 export * from "./icons.js";

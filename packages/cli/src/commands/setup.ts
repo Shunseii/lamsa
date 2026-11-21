@@ -38,6 +38,7 @@ UI designs live in \`*.lamsa.json\` files (see \`lamsa.config.json\`). They are 
 - Change: \`lamsa add --tree\`, \`lamsa move\`, \`lamsa delete\`, or edit the JSON directly.
 - Check: \`lamsa validate\`, then \`lamsa render <id|file>\` and look at the PNG.
 - The user's selection in the editor: \`lamsa selection --json\`.
+- Comments people pinned to layers: \`lamsa comments --open --json\`; address each, then \`lamsa comments resolve <id> --reply "<what you did>"\`.
 - Every command takes \`--json\`. Full guide: \`lamsa skill\`.
 ${MARK_END}
 `;
@@ -93,6 +94,7 @@ export async function initCommand({
       designs: [`${designs.replace(/\/+$/, "")}/**/*.lamsa.json`],
       tokens: tokenPath ? { adapter: "shadcn-tailwind4", path: tokenPath } : { adapter: "none" },
       assetsDir: `${designs.replace(/\/+$/, "")}/assets`,
+      commentsDir: `${designs.replace(/\/+$/, "")}/comments`,
       agent: { command: agent === "generic" || agent === "cursor" ? "claude" : agent, args: [] },
     };
     await writeFileAtomic(configPath, stableStringify(config));

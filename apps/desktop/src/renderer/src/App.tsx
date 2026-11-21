@@ -3,6 +3,7 @@ import { TriangleAlert } from "lucide-react";
 import { useEffect } from "react";
 import { Canvas } from "./canvas/Canvas";
 import { installShortcuts } from "./lib/commands";
+import { installComments } from "./lib/comments";
 import { api, useEditor } from "./lib/store";
 import { fitTo } from "./lib/viewport";
 import { baseId } from "./lib/model";
@@ -87,12 +88,14 @@ export function App() {
       });
     const offs = [
       api().onExternalChange((change) => useEditor.getState().applyExternal(change)),
+      api().onAgentActivity((activity) => useEditor.getState().noteAgentActivity(activity)),
       api().onOpenRequest((request) => void handleOpenRequest(request)),
       api().onProjectReloaded((snapshot) => {
         useEditor.getState().loadSnapshot(snapshot);
         useEditor.getState().toast({ tone: "neutral", title: "Tokens or config changed", message: "Reloaded from disk" });
       }),
       installShortcuts(),
+      installComments(),
     ];
     return () => {
       for (const off of offs) off();

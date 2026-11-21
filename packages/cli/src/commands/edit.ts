@@ -1,9 +1,11 @@
 import { join } from "node:path";
 import {
   addTree,
+  allNodes,
   deleteNodes,
   isDesignFile,
   moveNode,
+  recordActivity,
   saveDesignFile,
   summarize,
   toRepoPath,
@@ -86,6 +88,7 @@ export async function addCommand({
     return ExitCode.invalid;
   }
   await persist(workspace.project, [result.file]);
+  await recordActivity({ root: workspace.project.root, activity: { command: "add", kind: "write", ids: result.rootIds, file: result.file } });
   out.result({ ok: true, written: true, ...result, issues }, () =>
     [
       ...issues.map(formatIssue),
@@ -129,6 +132,7 @@ export async function moveCommand({
   }
   const result = moveNode({ project: workspace.project, id, placement });
   await persist(workspace.project, [result.from, result.to]);
+  await recordActivity({ root: workspace.project.root, activity: { command: "move", kind: "write", ids: [id], file: result.to } });
   out.result({ ok: true, ...result }, () =>
     `moved ${id} (${result.moved.length} node(s))${result.from !== result.to ? ` from ${result.from} to ${result.to}` : ` within ${result.to}`}`,
   );
@@ -142,8 +146,12 @@ export async function splitCommand({ out, id, to }: { out: Output; id: string; t
 
 export async function deleteCommand({ out, ids }: { out: Output; ids: string[] }): Promise<number> {
   const workspace = await openWorkspace();
+  const before = allNodes(workspace.project);
   const result = deleteNodes({ project: workspace.project, ids });
   await persist(workspace.project, result.files);
+  // Deleted layers can't be pointed at, so the agent shows at what held them.
+  const parents = ids.flatMap((id) => before[id]?.parentId ?? []).filter((id) => !result.deleted.includes(id));
+  await recordActivity({ root: workspace.project.root, activity: { command: "delete", kind: "write", ids: parents, file: result.files[0] } });
   out.result({ ok: true, ...result }, () =>
     [
       `deleted ${result.deleted.length} node(s)`,

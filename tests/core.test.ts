@@ -1,5 +1,8 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  ACTIVITY_FILE,
   addTree,
   buildChildIndex,
   childrenOf,
@@ -14,6 +17,8 @@ import {
   loadTokens,
   moveNode,
   parseShadcnTailwind4,
+  readActivity,
+  recordActivity,
   validateProject,
 } from "@lamsa/core";
 import { GLOBALS_CSS, tempRepo } from "./helpers.js";
@@ -217,3 +222,22 @@ describe("node css", () => {
   });
 });
 
+
+describe("agent activity", () => {
+  it("keeps the newest entry, caps its ids and reads back only well-formed entries", async () => {
+    const root = tempRepo({ ".lamsa/session.json": { selection: [] } });
+    const ids = Array.from({ length: 80 }, (_, i) => `id${i}`);
+    await recordActivity({ root, activity: { command: "add", kind: "write", ids: [...ids, "id0"] }, env: { LAMSA_AGENT_NAME: "Tester" } });
+    await recordActivity({ root, activity: { command: "tree", kind: "read", ids: ["abc"], file: "designs/a.lamsa.json" }, env: {} });
+    const latest = await readActivity(root);
+    expect(latest).toMatchObject({ agent: "Agent", command: "tree", kind: "read", ids: ["abc"], file: "designs/a.lamsa.json" });
+
+    await recordActivity({ root, activity: { command: "add", kind: "write", ids: [...ids, "id0"] }, env: {} });
+    expect((await readActivity(root))?.ids).toEqual(ids.slice(0, 50));
+
+    writeFileSync(join(root, ACTIVITY_FILE), JSON.stringify({ command: "add", kind: "delete", ids: [] }));
+    expect(await readActivity(root)).toBeUndefined();
+    writeFileSync(join(root, ACTIVITY_FILE), "{ half");
+    expect(await readActivity(root)).toBeUndefined();
+  });
+});

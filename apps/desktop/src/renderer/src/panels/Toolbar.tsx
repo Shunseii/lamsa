@@ -8,6 +8,7 @@ import {
   Image as ImageIcon,
   ImagePlay,
   Keyboard,
+  MessageCircle,
   Moon,
   MousePointer2,
   PanelBottom,
@@ -96,6 +97,7 @@ const TOOLS: { tool: Tool; icon: ReactNode; label: string; keys: string }[] = [
   { tool: "image", icon: <ImageIcon size={16} />, label: "Image", keys: "I" },
   { tool: "icon", icon: <Smile size={16} />, label: "Icon", keys: "" },
   { tool: "component", icon: <Component size={16} />, label: "Component", keys: "C" },
+  { tool: "comment", icon: <MessageCircle size={16} />, label: "Comment", keys: "M" },
 ];
 
 export async function insertImage() {
@@ -180,7 +182,7 @@ export function Toolbar() {
       void insertImage();
       return;
     }
-    setTool(next === "component" && tool === "component" ? "select" : next);
+    setTool((next === "component" || next === "comment") && tool === next ? "select" : next);
   };
 
   const render = async () => {

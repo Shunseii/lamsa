@@ -2,6 +2,8 @@ import { useShallow } from "zustand/react/shallow";
 import type { DesignNode } from "@lamsa/schema";
 import {
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Component,
   Eye,
   EyeOff,
@@ -36,6 +38,7 @@ import { fitTo } from "../lib/viewport";
 import { AddFileMenu, closedFiles, revealFiles } from "./AddFileMenu";
 import { insertInstance } from "./ComponentPicker";
 import { cn } from "../lib/cn";
+import { Tip } from "./Toolbar";
 
 function NodeIcon({ node }: { node: DesignNode }) {
   if (node.type === "text") return <Type size={14} />;
@@ -78,7 +81,7 @@ const HIDE_SHORTCUT = shortcut("mod+shift+h");
 interface RowHandlers {
   click(event: React.MouseEvent, id: string): void;
   contextMenu(event: React.MouseEvent, id: string): void;
-  toggleCollapsed(id: string): void;
+  toggleCollapsed(id: string, options: { subtree: boolean }): void;
   dragStart(event: React.DragEvent, id: string): void;
   dragOver(event: React.DragEvent, id: string): void;
   dragLeave(id: string): void;
@@ -94,11 +97,13 @@ interface LayerRowProps {
   selected: boolean;
   open: boolean;
   dropHere: "before" | "after" | "inside" | null;
+  /** When the agent's highlight on this layer ends; a new value restarts it. */
+  agentChangedUntil: number | undefined;
   handlers: React.RefObject<RowHandlers | null>;
 }
 
 /** One row of the tree. Memoised so a selection or hover change re-renders only the rows it touches. */
-const LayerRow = memo(function LayerRow({ id, depth, model, preview, selected, open, dropHere, handlers }: LayerRowProps) {
+const LayerRow = memo(function LayerRow({ id, depth, model, preview, selected, open, dropHere, agentChangedUntil, handlers }: LayerRowProps) {
   const node = model.nodes[id]!;
   const hasKids = childrenOf(model, id).length > 0;
   const defaultHidden = hiddenByDefault(model, id, preview);
@@ -123,12 +128,13 @@ const LayerRow = memo(function LayerRow({ id, depth, model, preview, selected, o
       onDoubleClick={() => fitTo("selection")}
       onContextMenu={(e) => on().contextMenu(e, id)}
     >
+      {agentChangedUntil !== undefined && <span key={agentChangedUntil} className="layer-flash" data-testid="layer-flash" aria-hidden />}
       <span
         className={cn("twisty", { "is-empty": !hasKids, "is-open": open })}
         style={{ marginLeft: depth * INDENT }}
         onClick={(e) => {
           e.stopPropagation();
-          on().toggleCollapsed(id);
+          on().toggleCollapsed(id, { subtree: e.altKey });
         }}
       >
         <ChevronRight size={12} />
@@ -234,9 +240,32 @@ function listTopIn(scroller: HTMLElement, list: HTMLElement): number {
   return list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
 }
 
+/** Layers in the given files that have children, i.e. the ones a twisty can close. */
+function parentLayers({ model, files }: { model: Model; files: ReadonlySet<string> }): string[] {
+  const result: string[] = [];
+  for (const id of model.children.keys()) if (model.nodes[id] && files.has(model.fileOf.get(id)!)) result.push(id);
+  return result;
+}
+
+/** The layer and every layer inside it that has children. */
+function parentsInSubtree(model: Model, id: string): string[] {
+  return [id, ...descendantsOf(model, id)].filter((layer) => childrenOf(model, layer).length > 0);
+}
+
+/** Per file, whether every top-level layer with children is collapsed; files with nothing to collapse are left out. */
+function collapsedFiles({ model, collapsed }: { model: Model; collapsed: ReadonlySet<string> }): Map<string, boolean> {
+  const result = new Map<string, boolean>();
+  for (const id of model.roots) {
+    if (childrenOf(model, id).length === 0) continue;
+    const file = model.fileOf.get(id)!;
+    result.set(file, (result.get(file) ?? true) && collapsed.has(id));
+  }
+  return result;
+}
+
 function LayersTree() {
-  const { model, selection, select, files, commit, previewProps, openFiles, closeFile } = useEditor(
-    useShallow((s) => ({ model: s.model, selection: s.selection, select: s.select, files: s.files, commit: s.commit, previewProps: s.previewProps, openFiles: s.openFiles, closeFile: s.closeFile })),
+  const { model, selection, select, files, commit, previewProps, openFiles, closeFile, flash } = useEditor(
+    useShallow((s) => ({ model: s.model, selection: s.selection, select: s.select, files: s.files, commit: s.commit, previewProps: s.previewProps, openFiles: s.openFiles, closeFile: s.closeFile, flash: s.flash })),
   );
   const [filter, setFilter] = useState("");
   const appliedFilter = useDeferredValue(filter);
@@ -290,6 +319,17 @@ function LayersTree() {
     result.push(y);
     return result;
   }, [items]);
+
+  const fileCollapsed = useMemo(() => collapsedFiles({ model, collapsed }), [model, collapsed]);
+  const everythingCollapsed = fileCollapsed.size > 0 && [...fileCollapsed.values()].every(Boolean);
+  const toggleAll = () => {
+    if (everythingCollapsed) setCollapsed(new Set());
+    else setCollapsed(new Set(parentLayers({ model, files: new Set(openFiles ?? []) })));
+  };
+  const toggleFile = (path: string) => {
+    if (fileCollapsed.get(path)) setCollapsed((current) => new Set([...current].filter((id) => model.fileOf.get(id) !== path)));
+    else setCollapsed((current) => new Set([...current, ...parentLayers({ model, files: new Set([path]) })]));
+  };
 
   const selected = useMemo(() => new Set(selection), [selection]);
   const draggedSubtree = useMemo(() => new Set(dragging ? descendantsOf(model, dragging) : []), [dragging, model]);
@@ -413,10 +453,14 @@ function LayersTree() {
       }
       useEditor.getState().setContextMenu({ x: e.clientX, y: e.clientY });
     },
-    toggleCollapsed(id) {
+    toggleCollapsed(id, { subtree }) {
       const next = new Set(collapsed);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const closing = !next.has(id);
+      const layers = subtree ? parentsInSubtree(model, id) : [id];
+      for (const layer of layers) {
+        if (closing) next.add(layer);
+        else next.delete(layer);
+      }
       setCollapsed(next);
     },
     dragStart(e, id) {
@@ -459,17 +503,41 @@ function LayersTree() {
           <Search size={14} />
           <input placeholder="Filter layers" value={filter} onChange={(e) => setFilter(e.target.value)} />
         </label>
+        <Tip className="tip-end" label={everythingCollapsed ? "Expand all layers" : "Collapse all layers"}>
+          <button
+            className="icon-btn small layers-collapse"
+            onClick={toggleAll}
+            disabled={fileCollapsed.size === 0}
+            aria-label={everythingCollapsed ? "Expand all layers" : "Collapse all layers"}
+            data-testid="collapse-all"
+          >
+            {everythingCollapsed ? <ChevronsUpDown size={16} /> : <ChevronsDownUp size={16} />}
+          </button>
+        </Tip>
         <AddFileMenu appearance="icon" />
       </div>
       <div ref={list} className="layer-list">
         {first > 0 && <div aria-hidden style={{ height: offsets[first] }} />}
         {shown.map((item) =>
           item.kind === "file" ? (
-            <div key={`file:${item.path}`} className="layer-file" title={item.path}>
+            <div key={`file:${item.path}`} className="layer-file" data-file={item.path}>
               <FileJson size={14} />
-              <span>{item.path.split("/").pop()}</span>
+              <span className="layer-file-name" title={item.path}>
+                {item.path.split("/").pop()}
+              </span>
               {files[item.path]?.error && <span className="badge badge-danger">invalid</span>}
-              <button className="icon-btn tiny layer-file-close push-right" onClick={() => void closeFile(item.path)} aria-label={`Close ${item.path}`} title="Close file (it stays on disk)">
+              {fileCollapsed.has(item.path) && (
+                <Tip className="tip-end push-right" label={fileCollapsed.get(item.path) ? "Expand all in this file" : "Collapse all in this file"}>
+                  <button
+                    className="icon-btn tiny layer-file-toggle"
+                    onClick={() => toggleFile(item.path)}
+                    aria-label={`${fileCollapsed.get(item.path) ? "Expand" : "Collapse"} all layers in ${item.path}`}
+                  >
+                    {fileCollapsed.get(item.path) ? <ChevronsUpDown size={12} /> : <ChevronsDownUp size={12} />}
+                  </button>
+                </Tip>
+              )}
+              <button className={cn("icon-btn tiny layer-file-close", !fileCollapsed.has(item.path) && "push-right")} onClick={() => void closeFile(item.path)} aria-label={`Close ${item.path}`} title="Close file (it stays on disk)">
                 <X size={12} />
               </button>
             </div>
@@ -483,6 +551,7 @@ function LayersTree() {
               selected={selected.has(item.id)}
               open={item.open}
               dropHere={drop?.id === item.id ? drop.where : null}
+              agentChangedUntil={flash[item.id]}
               handlers={handlers}
             />
           ),

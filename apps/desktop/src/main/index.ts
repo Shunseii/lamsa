@@ -5,7 +5,8 @@ import { basename, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, screen, shell } from "electron";
 import { checkFileCss, checkNodeCss, findProjectRoot, formatFileCss, formatNodeCss, lucideIconNames } from "@lamsa/core";
-import type { Change, CssScope, OpenRequest, ProjectSnapshot, RecentProject, WelcomeState } from "../shared/api.js";
+import type { Change, CommentRequest, CssScope, OpenRequest, ProjectSnapshot, RecentProject, WelcomeState } from "../shared/api.js";
+import { CommentsService } from "./comments-service.js";
 import { ProjectService } from "./project-service.js";
 import { createAgent, registerAgentIpc, type WindowAgent } from "./agent/ipc.js";
 
@@ -43,6 +44,7 @@ interface ProjectWindow {
   /** The host of this window's `lamsa-asset://` URLs, so each window loads images and fonts from its own project. */
   assetHost: string;
   service: ProjectService;
+  comments: CommentsService;
   agent: WindowAgent;
   send: (channel: string, value: unknown) => void;
   /** Taken by the page when it loads: the project, file, and selection to open. */
@@ -125,19 +127,22 @@ function createWindow(request: OpenRequest): ProjectWindow {
   };
   const service = new ProjectService({
     external: (change) => {
-      send("external-change", change);
+      send("external-change", { ...change, agent: agent.activeName() });
       agent.noteChange(change);
     },
     reloaded: (snapshot) => send("project-reloaded", snapshot),
+    activity: (activity) => send("agent-activity", activity),
   });
   const agent = createAgent({ service, send });
-  const context: ProjectWindow = { window, assetHost, service, agent, send, pending: request, opening: rootOf(request) };
+  const comments = new CommentsService((state) => send("comments-changed", state));
+  const context: ProjectWindow = { window, assetHost, service, comments, agent, send, pending: request, opening: rootOf(request) };
   const id = window.webContents.id;
   windows.set(id, context);
   window.on("closed", () => {
     windows.delete(id);
     agent.stop();
     void service.close();
+    void comments.close();
   });
   if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void window.loadFile(join(here, "../renderer/index.html"));
@@ -154,6 +159,7 @@ function reveal(context: ProjectWindow) {
 async function openIn(context: ProjectWindow, { root, file }: { root: string; file?: string }): Promise<ProjectSnapshot> {
   context.opening = root;
   const snapshot = await context.service.openProject(root, { file });
+  await context.comments.open({ root, config: snapshot.config });
   context.opening = undefined;
   context.uninitialised = undefined;
   await rememberProject(root);
@@ -249,6 +255,7 @@ function registerIpc() {
     context.agent.stop();
     context.opening = undefined;
     await context.service.close();
+    await context.comments.close();
     context.window.setTitle("lamsa");
   });
 
@@ -269,6 +276,8 @@ function registerIpc() {
   });
 
   handle("apply-changes", (context, changes: Change[]) => context.service.applyChanges(changes));
+  handle("comments", (context) => context.comments.current());
+  handle("update-comments", (context, request: CommentRequest) => context.comments.apply(request));
   handle("icons", (context, names: string[]) => context.service.icons(names));
   ipcMain.handle("format-css", (_event, css: string, scope?: CssScope) => (scope === "file" ? formatFileCss(css) : formatNodeCss(css)));
   ipcMain.handle("check-css", (_event, css: string, scope?: CssScope) => (scope === "file" ? checkFileCss(css) : checkNodeCss(css)));

@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { relative, resolve } from "node:path";
-import { allNodes } from "@lamsa/core";
+import { allNodes, indexNodes, recordActivity } from "@lamsa/core";
 import type { TokenMode } from "@lamsa/schema";
 import { openWorkspace } from "../context.js";
 import { CliError, ExitCode, type Output } from "../output.js";
@@ -43,6 +43,10 @@ export async function renderCommand({
   const workspace = await openWorkspace();
   const ids = resolveTargets(workspace.project, targets);
   if (ids.length === 0) throw new CliError("nothing to render", ExitCode.notFound, "add a top-level frame first");
+  if (targets.length > 0) {
+    const file = ids[0] ? indexNodes(workspace.project).get(ids[0])?.file : undefined;
+    await recordActivity({ root: workspace.project.root, activity: { command: "render", kind: "read", ids, file } });
+  }
   const nodes = allNodes(workspace.project);
   const dir = outDir ? resolve(outDir) : defaultRenderDir(workspace.project.root);
   mkdirSync(dir, { recursive: true });

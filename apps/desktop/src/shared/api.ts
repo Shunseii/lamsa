@@ -1,4 +1,4 @@
-import type { DesignNode, LamsaConfig, TokenSet } from "@lamsa/schema";
+import type { CommentThread, DesignNode, LamsaConfig, TokenSet } from "@lamsa/schema";
 import type { AgentAvailability, AgentSendRequest, AgentSessionSummary, AgentTerminalState, AgentTurnEvents, ChatItem } from "./agent.js";
 
 export interface FileState {
@@ -69,7 +69,31 @@ export interface ExternalChange {
   issues: ProjectIssue[];
   /** The open list, when this change altered it (a new file was created, or an open one deleted). */
   open?: string[];
+  /** The agent that made the change, when the editor's own chat was running a turn. */
+  agent?: string;
 }
+
+/** A CLI command the agent ran (from `.lamsa/activity.json`): where the editor shows the agent working. */
+export interface AgentActivity {
+  agent: string;
+  command: string;
+  kind: "read" | "write";
+  ids: string[];
+  file?: string;
+}
+
+/** The project's comment threads, oldest first, plus thread files that couldn't be read. */
+export interface CommentsState {
+  threads: CommentThread[];
+  errors: string[];
+}
+
+/** A change the user makes to comments in the editor; the main process signs it with their git name. */
+export type CommentRequest =
+  | { kind: "add"; nodeId: string; offset?: { x: number; y: number }; text: string }
+  | { kind: "reply"; id: string; text: string }
+  | { kind: "resolve"; id: string; reply?: string }
+  | { kind: "reopen"; id: string };
 
 export interface OpenRequest {
   root?: string;
@@ -145,7 +169,14 @@ export interface LamsaApi {
   agentTerminal(request: { sessionId: string | null; resume: boolean }): Promise<{ ok: boolean; error?: string; sessionId?: string }>;
   /** Opens the agent CLI in the user's terminal so they can sign in there. */
   agentSignIn(): Promise<{ ok: boolean; error?: string }>;
+  /** This project's comment threads (empty when no project is open). */
+  comments(): Promise<CommentsState>;
+  /** Writes a comment, reply, resolve or reopen to the thread files and returns the threads after it. */
+  updateComments(request: CommentRequest): Promise<CommentsState>;
+  /** Comment threads changed on disk (the agent's CLI, or another window). */
+  onCommentsChanged(listener: (state: CommentsState) => void): () => void;
   onExternalChange(listener: (change: ExternalChange) => void): () => void;
+  onAgentActivity(listener: (activity: AgentActivity) => void): () => void;
   onOpenRequest(listener: (request: OpenRequest) => void): () => void;
   onAgentEvents(listener: (batch: AgentTurnEvents) => void): () => void;
   onAgentTerminal(listener: (state: AgentTerminalState) => void): () => void;

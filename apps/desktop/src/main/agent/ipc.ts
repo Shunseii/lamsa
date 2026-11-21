@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
 import type { IpcMain, WebContents } from "electron";
 import {
   type AgentAvailability,
@@ -138,6 +139,13 @@ export function createAgent({ service, send }: { service: ProjectService; send: 
     },
 
     noteChange: (change: ExternalChange) => runner.noteChange(change),
+    /** The chat's agent by name ("Claude") while one of its turns is changing files; undefined otherwise. */
+    activeName(): string | undefined {
+      const command = agentConfig()?.command;
+      if (!runner.busy || !command) return undefined;
+      const name = basename(command).replace(/\.(exe|cmd)$/i, "");
+      return name.charAt(0).toUpperCase() + name.slice(1);
+    },
   };
 }
 
