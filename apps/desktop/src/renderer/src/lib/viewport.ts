@@ -1,4 +1,5 @@
 import { findElement } from "../canvas/FrameView";
+import { DOCK_DEFAULT_SIZE, dockSize, type DockId } from "./layout";
 import { rootOf, type Model } from "./model";
 import { useEditor } from "./store";
 
@@ -31,7 +32,7 @@ function visibleRect(model: Model, id: string): DOMRect | null {
 }
 
 export function fitTo(target: "all" | "selection") {
-  const { model, selection, viewport, setViewport, panels } = useEditor.getState();
+  const { model, selection, viewport, setViewport, panels, layout } = useEditor.getState();
   const box = canvasBox();
   if (!box) return;
   const ids = target === "selection" && selection.length ? selection : model.roots;
@@ -50,10 +51,12 @@ export function fitTo(target: "all" | "selection") {
     bottom = Math.max(bottom, y + rect.height / viewport.zoom);
   }
   if (!Number.isFinite(left)) return;
-  const insetLeft = panels.layers ? 290 : 24;
-  const insetRight = panels.properties ? 330 : 24;
+  const dockInset = (dock: DockId) =>
+    panels[dock] && layout[dock].tabs.length ? (dockSize(layout, dock) ?? DOCK_DEFAULT_SIZE[dock]) + 34 : 24;
+  const insetLeft = dockInset("left");
+  const insetRight = dockInset("right");
   const insetTop = 80;
-  const insetBottom = panels.terminal ? 360 : 70;
+  const insetBottom = dockInset("centre");
   const availableW = Math.max(200, box.width - insetLeft - insetRight);
   const availableH = Math.max(200, box.height - insetTop - insetBottom);
   const zoom = Math.min(2, availableW / (right - left), availableH / (bottom - top));

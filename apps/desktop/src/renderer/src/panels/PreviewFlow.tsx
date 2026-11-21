@@ -113,7 +113,9 @@ ${reduced ? emulateReducedMotion(css) : css}</style></head><body><div id="lamsa-
       }
       onPairRef.current(type === "forward" ? next - 1 : next);
       const transition = document.startViewTransition({ update: swap, types: [type] });
-      transition.ready.then(() => document.getAnimations().forEach((animation) => (animation.playbackRate = speedRef.current))).catch(() => {});
+      transition.ready.then(() => document.getAnimations().forEach((animation) => {
+        animation.playbackRate = speedRef.current;
+      })).catch(() => {});
       return transition.finished.catch(() => {});
     },
     [pages],

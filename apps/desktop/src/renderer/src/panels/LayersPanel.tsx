@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { memo, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { reparent } from "../lib/edits";
+import type { NodeChange } from "../../../shared/api";
 import { toggleFlag } from "../lib/commands";
 import { shortcut } from "../lib/keys";
 import {
@@ -48,25 +49,25 @@ function NodeIcon({ node }: { node: DesignNode }) {
 type Drop = { id: string; where: "before" | "after" | "inside" } | null;
 
 export function LayersPanel() {
-  const { leftTab, setLeftTab } = useEditor(
-    useShallow((s) => ({ leftTab: s.leftTab, setLeftTab: s.setLeftTab })),
-  );
   return (
-    <div className="panel panel-left" data-testid="layers-panel">
-      <div className="tabs">
-        {(["layers", "files", "components"] as const).map((tab) => (
-          <button
-            key={tab}
-            className={cn("tab", { "is-active": leftTab === tab })}
-            onClick={() => setLeftTab(tab)}
-          >
-            {tab[0]!.toUpperCase() + tab.slice(1)}
-          </button>
-        ))}
-      </div>
-      {leftTab === "layers" && <LayersTree />}
-      {leftTab === "files" && <FilesList />}
-      {leftTab === "components" && <ComponentsList />}
+    <div className="dock-body" data-testid="layers-panel">
+      <LayersTree />
+    </div>
+  );
+}
+
+export function FilesPanel() {
+  return (
+    <div className="dock-body" data-testid="files-panel">
+      <FilesList />
+    </div>
+  );
+}
+
+export function ComponentsPanel() {
+  return (
+    <div className="dock-body" data-testid="components-panel">
+      <ComponentsList />
     </div>
   );
 }
@@ -109,7 +110,6 @@ const LayerRow = memo(function LayerRow({ id, depth, model, preview, selected, o
         "is-hidden": node.hidden || defaultHidden,
         "is-locked": isLocked(model, id),
       })}
-      style={{ paddingLeft: 8 + depth * 14 }}
       data-layer-id={id}
       draggable
       onDragStart={(e) => on().dragStart(e, id)}
@@ -125,6 +125,7 @@ const LayerRow = memo(function LayerRow({ id, depth, model, preview, selected, o
     >
       <span
         className={cn("twisty", { "is-empty": !hasKids, "is-open": open })}
+        style={{ marginLeft: depth * INDENT }}
         onClick={(e) => {
           e.stopPropagation();
           on().toggleCollapsed(id);
@@ -134,43 +135,45 @@ const LayerRow = memo(function LayerRow({ id, depth, model, preview, selected, o
       </span>
       <NodeIcon node={node} />
       <span className="layer-name">{nodeTitle(id, node)}</span>
-      {node.type === "instance" && (
-        <span className="layer-meta">{nodeTitle(node.componentId, model.nodes[node.componentId])}</span>
-      )}
-      <span className="layer-actions" onDoubleClick={(e) => e.stopPropagation()}>
-        <button
-          className={cn("layer-action", { "is-on": node.locked })}
-          aria-label={node.locked ? "Unlock layer" : "Lock layer"}
-          title={`${node.locked ? "Unlock" : "Lock"} (${LOCK_SHORTCUT})`}
-          onClick={(e) => {
-            e.stopPropagation();
-            void toggleFlag({ ids: [id], field: "locked" });
-          }}
-        >
-          {node.locked ? <Lock size={12} /> : <LockOpen size={12} />}
-        </button>
-        {!node.hidden && defaultHidden ? (
+      <span className="layer-trail">
+        {node.type === "instance" && (
+          <span className="layer-meta">{nodeTitle(node.componentId, model.nodes[node.componentId])}</span>
+        )}
+        <span className="layer-actions" onDoubleClick={(e) => e.stopPropagation()}>
           <button
-            className="layer-action is-on is-locked-by-prop"
-            aria-label="Hidden by a prop"
-            title={`Hidden by a prop (${defaultHidden.prop} = ${String(defaultHidden.value)})`}
-            disabled
-          >
-            <EyeOff size={12} />
-          </button>
-        ) : (
-          <button
-            className={cn("layer-action", { "is-on": node.hidden })}
-            aria-label={node.hidden ? "Show layer" : "Hide layer"}
-            title={`${node.hidden ? "Show" : "Hide"} (${HIDE_SHORTCUT})`}
+            className={cn("layer-action", { "is-on": node.locked })}
+            aria-label={node.locked ? "Unlock layer" : "Lock layer"}
+            title={`${node.locked ? "Unlock" : "Lock"} (${LOCK_SHORTCUT})`}
             onClick={(e) => {
               e.stopPropagation();
-              void toggleFlag({ ids: [id], field: "hidden" });
+              void toggleFlag({ ids: [id], field: "locked" });
             }}
           >
-            {node.hidden ? <EyeOff size={12} /> : <Eye size={12} />}
+            {node.locked ? <Lock size={12} /> : <LockOpen size={12} />}
           </button>
-        )}
+          {!node.hidden && defaultHidden ? (
+            <button
+              className="layer-action is-on is-locked-by-prop"
+              aria-label="Hidden by a prop"
+              title={`Hidden by a prop (${defaultHidden.prop} = ${String(defaultHidden.value)})`}
+              disabled
+            >
+              <EyeOff size={12} />
+            </button>
+          ) : (
+            <button
+              className={cn("layer-action", { "is-on": node.hidden })}
+              aria-label={node.hidden ? "Show layer" : "Hide layer"}
+              title={`${node.hidden ? "Show" : "Hide"} (${HIDE_SHORTCUT})`}
+              onClick={(e) => {
+                e.stopPropagation();
+                void toggleFlag({ ids: [id], field: "hidden" });
+              }}
+            >
+              {node.hidden ? <EyeOff size={12} /> : <Eye size={12} />}
+            </button>
+          )}
+        </span>
       </span>
     </div>
   );
@@ -185,6 +188,32 @@ const ROW_PITCH = 30;
 /** Lists up to this long render every row; longer ones render the rows in view plus this margin. */
 const RENDER_ALL_BELOW = 400;
 const OVERSCAN_PX = 600;
+
+/** Row geometry from styles.css, used to size the list's scroll width without measuring rows. Each level indents the twisty (a margin, not row padding, so the pinned trail can slide over the indent). */
+const LIST_PADDING = 6;
+const ROW_INSET = 8;
+const INDENT = 14;
+/** Twisty and type icon (14px each), each followed by the row's 6px gap. */
+const ROW_LEAD = 40;
+const NAME_MIN = 64;
+/** Once the list scrolls sideways anyway, the deepest names get this much room instead. */
+const NAME_ROOMY = 160;
+/** The 6px gap, the lock and hide buttons (20px + 1px + 20px), and the row's 8px right padding. */
+const ROW_TRAIL = 55;
+
+/** Width of the list content: the panel's width while every row keeps its minimum name width, wider (with roomier names) once the deepest row doesn't fit. */
+function contentWidth({ deepest, viewWidth }: { deepest: number; viewWidth: number }) {
+  const rowWithoutName = LIST_PADDING * 2 + ROW_INSET + deepest * INDENT + ROW_LEAD + ROW_TRAIL;
+  return rowWithoutName + NAME_MIN <= viewWidth ? 0 : rowWithoutName + NAME_ROOMY;
+}
+
+/** Scrolls the list sideways so a row's twisty, icon and the start of its name are in view, keeping two levels of indent for context. */
+function revealHorizontally({ scroller, depth }: { scroller: HTMLElement; depth: number }) {
+  const rowStart = LIST_PADDING + ROW_INSET + depth * INDENT;
+  const nameEnd = rowStart + ROW_LEAD + NAME_MIN;
+  const visibleEnd = scroller.scrollLeft + scroller.clientWidth - ROW_TRAIL - LIST_PADDING;
+  if (rowStart < scroller.scrollLeft || nameEnd > visibleEnd) scroller.scrollLeft = rowStart - INDENT * 2;
+}
 
 const itemHeight = (item: ListItem) => (item.kind === "file" ? FILE_HEIGHT : ROW_PITCH);
 
@@ -233,20 +262,22 @@ function LayersTree() {
     return keep;
   }, [appliedFilter, model]);
 
-  /** File headers and rows in display order, skipping collapsed and filtered-out layers. */
-  const items = useMemo(() => {
+  /** File headers and rows in display order, skipping collapsed and filtered-out layers, and the depth of the deepest row. */
+  const { items, deepest } = useMemo(() => {
     const result: ListItem[] = [];
+    let deepest = 0;
     for (const path of [...(openFiles ?? [])].sort()) {
       result.push({ kind: "file", path });
       const walk = (id: string, depth: number) => {
         if (!model.nodes[id] || (matches && !matches.has(id))) return;
         const open = !collapsed.has(id) || matches !== null;
         result.push({ kind: "row", id, depth, open });
+        if (depth > deepest) deepest = depth;
         if (open) for (const kid of childrenOf(model, id)) walk(kid, depth + 1);
       };
       for (const id of model.roots) if (model.fileOf.get(id) === path) walk(id, 1);
     }
-    return result;
+    return { items: result, deepest };
   }, [openFiles, model, matches, collapsed]);
 
   const offsets = useMemo(() => {
@@ -264,15 +295,17 @@ function LayersTree() {
   const draggedSubtree = useMemo(() => new Set(dragging ? descendantsOf(model, dragging) : []), [dragging, model]);
 
   const list = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState({ top: 0, height: 0 });
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState({ top: 0, height: 0, width: 0 });
   const measureView = () => {
-    const scroller = list.current?.parentElement;
+    const scroller = scrollerRef.current;
     if (!scroller || !list.current) return;
     const top = scroller.scrollTop - listTopIn(scroller, list.current);
-    setView((current) => (current.top === top && current.height === scroller.clientHeight ? current : { top, height: scroller.clientHeight }));
+    const { clientHeight: height, clientWidth: width } = scroller;
+    setView((current) => (current.top === top && current.height === height && current.width === width ? current : { top, height, width }));
   };
   useLayoutEffect(() => {
-    const scroller = list.current?.parentElement;
+    const scroller = scrollerRef.current;
     if (!scroller) return;
     measureView();
     const observer = new ResizeObserver(measureView);
@@ -309,11 +342,13 @@ function LayersTree() {
     const id = reveal.current;
     if (!id) return;
     const index = items.findIndex((item) => item.kind === "row" && item.id === id);
-    const scroller = list.current?.parentElement;
+    const item = items[index];
+    const scroller = scrollerRef.current;
     if (index === -1 || !scroller || !list.current) return;
     reveal.current = null;
     const rowMiddle = listTopIn(scroller, list.current) + offsets[index]! + ROW_HEIGHT / 2;
     scroller.scrollTop = rowMiddle - scroller.getBoundingClientRect().height / 2;
+    if (item?.kind === "row") revealHorizontally({ scroller, depth: item.depth });
     measureView();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, items]);
@@ -333,7 +368,7 @@ function LayersTree() {
     if (!dragging || !drop) return;
     const target = model.nodes[drop.id];
     if (!target) return;
-    let changes;
+    let changes: NodeChange[];
     if (drop.where === "inside") {
       changes = reparent({ model, id: dragging, parentId: drop.id, beforeId: null });
     } else {
@@ -410,8 +445,15 @@ function LayersTree() {
     },
   };
 
+  /** Wide enough for the deepest row; the visible width lets the search row and file headers stay put while it scrolls sideways. */
+  const contentStyle = {
+    minWidth: contentWidth({ deepest, viewWidth: view.width }),
+    ...(view.width > 0 && { "--layers-view-w": `${view.width}px` }),
+  } as React.CSSProperties;
+
   return (
-    <div className="panel-body">
+    <div ref={scrollerRef} className="panel-body layers-body">
+      <div className="layers-content" style={contentStyle}>
       <div className="search-row">
         <label className="search">
           <Search size={14} />
@@ -447,6 +489,7 @@ function LayersTree() {
         )}
         {last < items.length - 1 && <div aria-hidden style={{ height: offsets[items.length]! - offsets[last + 1]! }} />}
       </div>
+      </div>
     </div>
   );
 }
@@ -476,7 +519,6 @@ function FilesList() {
                   <span>{path.split("/").pop()}</span>
                   <span className="muted mono small">{path}</span>
                 </span>
-                <span className="muted small">{roots.length} top-level</span>
                 {fileIssues.some((i) => i.severity === "error") && <span className="badge badge-danger">{fileIssues.length}</span>}
               </button>
               <button className="icon-btn tiny file-close" onClick={() => void closeFile(path)} aria-label={`Close ${path}`} title="Close file (it stays on disk)">

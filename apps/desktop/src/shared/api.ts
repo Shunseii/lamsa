@@ -1,4 +1,5 @@
 import type { DesignNode, LamsaConfig, TokenSet } from "@lamsa/schema";
+import type { AgentAvailability, AgentSendRequest, AgentSessionSummary, AgentTerminalState, AgentTurnEvents, ChatItem } from "./agent.js";
 
 export interface FileState {
   path: string;
@@ -96,12 +97,19 @@ export interface RenderResultSummary {
 }
 
 export interface LamsaApi {
+  /** Host of this window's `lamsa-asset://` URLs: each window serves images and fonts from its own project. */
+  assetHost: string;
   welcome(): Promise<WelcomeState>;
   /** Removes a project from the recent list (the folder itself is untouched). */
   forgetRecent(root: string): Promise<WelcomeState>;
+  /** A picked folder without lamsa.config.json comes back as `uninitialised`, unless this window has a project (it opens a new window). */
   chooseFolder(): Promise<{ root?: string; uninitialised?: string }>;
-  openProject(root: string): Promise<ProjectSnapshot>;
-  /** Closes the project (and its agent terminal) to go back to the welcome screen. */
+  /**
+   * Opens a project in this window when it has none. Otherwise the project opens in its own window (or the window that
+   * already has it comes forward) and this returns null.
+   */
+  openProject(root: string): Promise<ProjectSnapshot | null>;
+  /** Closes the project (and stops its agent chat turn) to go back to the welcome screen. */
   closeProject(): Promise<void>;
   current(): Promise<ProjectSnapshot | null>;
   applyChanges(changes: Change[]): Promise<{ ok: boolean; error?: string; issues: ProjectIssue[] }>;
@@ -124,13 +132,22 @@ export interface LamsaApi {
   render(ids: string[], mode?: "light" | "dark"): Promise<RenderResultSummary[]>;
   importImage(): Promise<{ src: string } | null>;
   revealPath(path: string): Promise<void>;
-  terminalStart(cols: number, rows: number): Promise<{ ok: boolean; error?: string; command: string }>;
-  terminalWrite(data: string): void;
-  terminalResize(cols: number, rows: number): void;
-  terminalExternal(): Promise<{ ok: boolean; error?: string }>;
+  /** Whether the agent chat can run; null when no project is open. */
+  agentStatus(): Promise<AgentAvailability | null>;
+  /** Starts a chat turn; its events arrive through `onAgentEvents`. */
+  agentSend(request: AgentSendRequest): Promise<{ ok: boolean; turnId?: string; error?: string }>;
+  agentStop(): Promise<void>;
+  /** This project's past conversations, newest first. */
+  agentSessions(): Promise<AgentSessionSummary[]>;
+  /** A past conversation as chat items; null when it has no saved session yet. */
+  agentTranscript(sessionId: string): Promise<ChatItem[] | null>;
+  /** Continues the session (a new one when null) in the user's own terminal. */
+  agentTerminal(request: { sessionId: string | null; resume: boolean }): Promise<{ ok: boolean; error?: string; sessionId?: string }>;
+  /** Opens the agent CLI in the user's terminal so they can sign in there. */
+  agentSignIn(): Promise<{ ok: boolean; error?: string }>;
   onExternalChange(listener: (change: ExternalChange) => void): () => void;
   onOpenRequest(listener: (request: OpenRequest) => void): () => void;
-  onTerminalData(listener: (data: string) => void): () => void;
-  onTerminalExit(listener: (code: number) => void): () => void;
+  onAgentEvents(listener: (batch: AgentTurnEvents) => void): () => void;
+  onAgentTerminal(listener: (state: AgentTerminalState) => void): () => void;
   onProjectReloaded(listener: (snapshot: ProjectSnapshot) => void): () => void;
 }

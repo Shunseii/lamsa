@@ -5,14 +5,16 @@ import type { NodeMap } from "../lib/model";
 
 export const shadowRoots = new Map<string, ShadowRoot>();
 
+const assetOrigin = () => `lamsa-asset://${window.lamsa?.assetHost ?? "local"}`;
+
 export function assetUrl(src: string): string {
   if (/^(https?:|data:)/.test(src)) return src;
-  return `lamsa-asset://local/${src.split("/").map(encodeURIComponent).join("/")}`;
+  return `${assetOrigin()}/${src.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 /** Points the project's relative font URLs at the asset protocol. */
 export function localFontCss(css: string): string {
-  return css.replace(/url\("(?!https?:|data:)([^"]+)"\)/g, (_m, path: string) => `url("lamsa-asset://local/${path}")`);
+  return css.replace(/url\("(?!https?:|data:)([^"]+)"\)/g, (_m, path: string) => `url("${assetOrigin()}/${path}")`);
 }
 
 export function shadowCss(tokens: TokenSet): string {
@@ -22,7 +24,8 @@ export function shadowCss(tokens: TokenSet): string {
 interface Props {
   id: string;
   nodes: NodeMap;
-  children: Map<string, string[]>;
+  /** Each node's child ids (named so React doesn't treat it as JSX children). */
+  childIds: Map<string, string[]>;
   tokens: TokenSet;
   icons: Record<string, string>;
   canvasMode: TokenMode;
@@ -70,7 +73,7 @@ function unchanged({ last, nodes, children, inputs }: { last: RenderedFrom | nul
 }
 
 /** Renders one top-level frame into its own shadow root, isolated from the editor's CSS. */
-export const FrameView = memo(function FrameView({ id, nodes, children, tokens, icons, canvasMode, version, frozen, componentProps, fileCss }: Props) {
+export const FrameView = memo(function FrameView({ id, nodes, childIds: children, tokens, icons, canvasMode, version, frozen, componentProps, fileCss }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const last = useRef<RenderedFrom | null>(null);
 

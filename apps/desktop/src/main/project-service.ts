@@ -201,6 +201,15 @@ export class ProjectService {
     };
   }
 
+  get config(): Project["config"] | undefined {
+    return this.project?.config;
+  }
+
+  /** Each loaded file's current nodes, without the validation and font work a full snapshot does. */
+  nodesByFile(): Map<string, Record<string, DesignNode>> {
+    return new Map([...this.files].map(([path, file]) => [path, file.nodes]));
+  }
+
   private require(): Project {
     if (!this.project) throw new Error("no project open");
     return this.project;

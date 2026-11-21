@@ -4,7 +4,7 @@ import { Braces, Check, ChevronDown, Component, Copy, Plus, Target, Unlink, X } 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { detachInstance, parseStyleInput, patchNodes, setStyle } from "../lib/edits";
 import { nodeTitle, type Model } from "../lib/model";
-import { useEditor } from "../lib/store";
+import { hasDarkTokens, useEditor } from "../lib/store";
 import { fitTo } from "../lib/viewport";
 import { CssEditor } from "./CssEditor";
 import { AutocompleteInput, type Suggestion } from "./AutocompleteInput";
@@ -166,7 +166,7 @@ function effectiveDisplay(model: Model, node: DesignNode): string {
   return "";
 }
 
-function valueOf(nodes: DesignNode[], property: string): string | typeof MIXED {
+function sharedValue(nodes: DesignNode[], property: string): string | typeof MIXED {
   const values = new Set(nodes.map((n) => (n.style?.[property] === undefined ? "" : String(n.style[property]))));
   return values.size > 1 ? MIXED : ([...values][0] ?? "");
 }
@@ -180,7 +180,7 @@ export function PropertiesPanel() {
   if (nodes.length === 0) {
     const fileIssues = issues.filter((i) => i.severity === "error").slice(0, 8);
     return (
-      <div className="panel panel-right" data-testid="properties-panel">
+      <div className="dock-body" data-testid="properties-panel">
         <div className="panel-body pad">
           <div className="title-sm">{snapshot?.name}</div>
           <div className="muted small">{Object.keys(snapshot?.files ?? {}).length} design files · {snapshot?.tokens.adapter} · {Object.keys(snapshot?.tokens.tokens ?? {}).length} tokens</div>
@@ -233,7 +233,7 @@ function SelectionProperties({ ids, nodes }: { ids: string[]; nodes: DesignNode[
   const write = (property: string, raw: string) => void commit(`Set ${property}`, setStyle(model, ids, { [property]: parseStyleInput(raw) }));
 
   return (
-    <div className="panel panel-right" data-testid="properties-panel">
+    <div className="dock-body" data-testid="properties-panel">
       <div className="panel-body">
         <div className="props-header">
           {single && singleId ? (
@@ -289,27 +289,29 @@ function SelectionProperties({ ids, nodes }: { ids: string[]; nodes: DesignNode[
               <Field label="x" value={String(single.x ?? 0)} onCommit={(v) => void commit("Move", patchNodes(model, ids, (n) => ({ ...n, x: Number(v) || 0 }) as DesignNode))} />
               <Field label="y" value={String(single.y ?? 0)} onCommit={(v) => void commit("Move", patchNodes(model, ids, (n) => ({ ...n, y: Number(v) || 0 }) as DesignNode))} />
             </div>
-            <div className="field">
-              <span className="field-label">mode</span>
-              <div className="segmented small">
-                {(["inherit", "light", "dark"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    className={cn({ "is-on": (single.mode ?? "inherit") === mode })}
-                    onClick={() => void commit("Set mode", patchNodes(model, ids, (n) => ({ ...n, mode: mode === "inherit" ? undefined : mode }) as DesignNode))}
-                  >
-                    {mode}
-                  </button>
-                ))}
+            {(hasDarkTokens(snapshot?.tokens) || single.mode) && (
+              <div className="field">
+                <span className="field-label">mode</span>
+                <div className="segmented small">
+                  {(["inherit", "light", "dark"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      className={cn({ "is-on": (single.mode ?? "inherit") === mode })}
+                      onClick={() => void commit("Set mode", patchNodes(model, ids, (n) => ({ ...n, mode: mode === "inherit" ? undefined : mode }) as DesignNode))}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </Section>
         )}
 
         {GROUPS.filter((g) => !g.when || g.when(types)).map((group) => (
           <Section key={group.title} title={group.title} collapsible>
             {group.fields.map((field) => {
-              const value = valueOf(nodes, field.property);
+              const value = sharedValue(nodes, field.property);
               if (field.appliesWhen && value === "" && !field.appliesWhen(layout)) return null;
               return (
                 <Field
@@ -342,7 +344,7 @@ function SelectionProperties({ ids, nodes }: { ids: string[]; nodes: DesignNode[
 
         <Section title="Other CSS">
           {extra.map((property) => {
-            const value = valueOf(nodes, property);
+            const value = sharedValue(nodes, property);
             return (
               <Field
                 key={property}

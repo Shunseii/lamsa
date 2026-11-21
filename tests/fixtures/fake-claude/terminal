@@ -1,0 +1,7 @@
+#!/bin/sh
+# A stand-in terminal emulator for tests: records how it was opened, then runs the command (after -e) without a window.
+if [ -n "$FAKE_TERMINAL_LOG" ]; then
+  printf '%s\n' "$(pwd)" "$*" >> "$FAKE_TERMINAL_LOG"
+fi
+[ "$1" = "-e" ] && shift
+exec "$@"

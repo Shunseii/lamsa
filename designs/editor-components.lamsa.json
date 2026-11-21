@@ -421,7 +421,7 @@
       },
       "type": "frame",
       "x": 700,
-      "y": 2481
+      "y": 2529
     },
     "4ZTWIvwB": {
       "componentId": "u3TsRQUk",
@@ -812,6 +812,24 @@
       },
       "type": "text"
     },
+    "8v2RbgTc": {
+      "componentId": "ZW3nSYnn",
+      "index": "a0",
+      "name": "Tab",
+      "overrides": {
+        "oCCxKr1v": {
+          "icon": "files"
+        }
+      },
+      "parentId": "mEn9tIeb",
+      "props": {
+        "badge": true,
+        "count": "2",
+        "label": "Files",
+        "state": "active"
+      },
+      "type": "instance"
+    },
     "8wMlz1Tv": {
       "content": "hover",
       "index": "a2",
@@ -836,6 +854,30 @@
         "width": 14
       },
       "type": "icon"
+    },
+    "9M797n6C": {
+      "index": "a1",
+      "name": "Badge",
+      "parentId": "ZW3nSYnn",
+      "style": {
+        "align-items": "center",
+        "background": "{color.danger}",
+        "border-radius": 7,
+        "box-shadow": "0 0 0 2px {color.surface}",
+        "color": "{color.on-accent}",
+        "display": "flex",
+        "font-size": 10,
+        "font-weight": "{font-weight.semibold}",
+        "height": 14,
+        "justify-content": "center",
+        "left": 13,
+        "line-height": 1,
+        "min-width": 14,
+        "padding": "0 4px",
+        "position": "absolute",
+        "top": 1
+      },
+      "type": "frame"
     },
     "9XNO9Rqq": {
       "content": "open",
@@ -977,7 +1019,7 @@
       },
       "type": "frame",
       "x": 280,
-      "y": 2791
+      "y": 2839
     },
     "AlpcThPR": {
       "componentId": "i3RbaNQr",
@@ -1011,8 +1053,7 @@
       "parentId": "z2uKZsPW",
       "style": {
         "align-items": "center",
-        "display": "flex",
-        "width": 70
+        "display": "flex"
       },
       "type": "frame"
     },
@@ -1432,6 +1473,18 @@
       },
       "type": "frame"
     },
+    "IWc7C6QN": {
+      "content": "hover",
+      "index": "a1V",
+      "parentId": "z2uKZsPW",
+      "style": {
+        "color": "{color.ink-3}",
+        "font-family": "{font.mono}",
+        "font-size": 11,
+        "white-space": "nowrap"
+      },
+      "type": "text"
+    },
     "IjUhgxC7": {
       "content": "#be3329",
       "index": "a1",
@@ -1510,6 +1563,26 @@
       },
       "type": "frame"
     },
+    "JknIVpCO": {
+      "index": "a8",
+      "name": "Cell",
+      "parentId": "z2uKZsPW",
+      "style": {
+        "align-items": "center",
+        "display": "flex"
+      },
+      "type": "frame"
+    },
+    "JyMs4h7h": {
+      "index": "a4V",
+      "name": "Cell",
+      "parentId": "z2uKZsPW",
+      "style": {
+        "align-items": "center",
+        "display": "flex"
+      },
+      "type": "frame"
+    },
     "K4cNY8eh": {
       "content": "Button",
       "index": "a4",
@@ -1518,7 +1591,11 @@
       "style": {
         "color": "{color.ink-3}",
         "flex-shrink": 0,
-        "font-size": 11
+        "font-size": 11,
+        "max-width": 96,
+        "overflow": "hidden",
+        "text-overflow": "ellipsis",
+        "white-space": "nowrap"
       },
       "type": "text"
     },
@@ -1659,7 +1736,7 @@
       },
       "type": "frame",
       "x": 280,
-      "y": 2481
+      "y": 2529
     },
     "Lf4IxvDt": {
       "index": "aF",
@@ -1744,7 +1821,7 @@
       },
       "type": "frame",
       "x": 280,
-      "y": 2663
+      "y": 2711
     },
     "MbBPtsmj": {
       "content": "token",
@@ -2048,7 +2125,7 @@
       "type": "frame"
     },
     "OJCOtBXJ": {
-      "content": "",
+      "content": "plain",
       "index": "a3",
       "parentId": "z2uKZsPW",
       "style": {
@@ -2091,6 +2168,24 @@
         "height": 72
       },
       "type": "frame"
+    },
+    "OlQX3GQ3": {
+      "componentId": "ZW3nSYnn",
+      "index": "a0",
+      "name": "Tab",
+      "overrides": {
+        "oCCxKr1v": {
+          "icon": "files"
+        }
+      },
+      "parentId": "a2zoPGtN",
+      "props": {
+        "badge": true,
+        "count": "2",
+        "label": "Files",
+        "state": "default"
+      },
+      "type": "instance"
     },
     "OluNkXIw": {
       "index": "a3",
@@ -2580,6 +2675,17 @@
       },
       "type": "frame"
     },
+    "Se4vg2V7": {
+      "componentId": "ZW3nSYnn",
+      "index": "a0",
+      "name": "Tab",
+      "parentId": "JyMs4h7h",
+      "props": {
+        "label": "Layers",
+        "state": "hover"
+      },
+      "type": "instance"
+    },
     "Sx3a9Zae": {
       "componentId": "PSjxI97L",
       "index": "a0",
@@ -2834,6 +2940,24 @@
       },
       "type": "frame"
     },
+    "WKWaR6K5": {
+      "componentId": "ZW3nSYnn",
+      "index": "a0",
+      "name": "Tab",
+      "overrides": {
+        "oCCxKr1v": {
+          "icon": "files"
+        }
+      },
+      "parentId": "JknIVpCO",
+      "props": {
+        "badge": true,
+        "count": "2",
+        "label": "Files",
+        "state": "hover"
+      },
+      "type": "instance"
+    },
     "WLnQ6ABD": {
       "componentId": "OyBIhVCU",
       "index": "a0",
@@ -3058,7 +3182,24 @@
     },
     "ZW3nSYnn": {
       "component": {
+        "description": "Panel tab. Every tab shows its icon (override the Icon node); only the open tab also shows its label. Hover shows a tooltip with the name and shortcut. A count badge (danger) sits on the icon's top-right corner when the panel needs attention, e.g. problems on Files; hidden at 0.",
         "props": {
+          "badge": {
+            "default": false,
+            "overrides": {
+              "false": {
+                "9M797n6C": {
+                  "hidden": true
+                }
+              }
+            },
+            "type": "boolean"
+          },
+          "count": {
+            "default": "2",
+            "target": "w6F33Yj8",
+            "type": "text"
+          },
           "label": {
             "default": "Layers",
             "target": "EuBm8F3D",
@@ -3068,6 +3209,7 @@
             "default": "default",
             "options": [
               "default",
+              "hover",
               "active"
             ],
             "overrides": {
@@ -3078,6 +3220,21 @@
                     "color": "{color.ink}"
                   }
                 }
+              },
+              "default": {
+                "EuBm8F3D": {
+                  "hidden": true
+                }
+              },
+              "hover": {
+                "EuBm8F3D": {
+                  "hidden": true
+                },
+                "ZW3nSYnn": {
+                  "style": {
+                    "color": "{color.ink-2}"
+                  }
+                }
               }
             },
             "type": "enum"
@@ -3086,14 +3243,18 @@
       },
       "name": "Tab",
       "style": {
+        "align-items": "center",
         "border-bottom": "2px solid transparent",
         "color": "{color.ink-3}",
+        "display": "flex",
         "font-family": "{font.sans}",
         "font-size": 13,
         "font-weight": "{font-weight.medium}",
+        "gap": 6,
         "line-height": 1.2,
         "margin-bottom": -1,
-        "padding": "6px 8px 8px"
+        "padding": "6px 8px 8px",
+        "position": "relative"
       },
       "type": "frame",
       "x": 280,
@@ -3118,6 +3279,16 @@
         "align-items": "center",
         "display": "flex",
         "width": 236
+      },
+      "type": "frame"
+    },
+    "a2zoPGtN": {
+      "index": "a7",
+      "name": "Cell",
+      "parentId": "z2uKZsPW",
+      "style": {
+        "align-items": "center",
+        "display": "flex"
       },
       "type": "frame"
     },
@@ -3264,7 +3435,7 @@
       },
       "type": "frame",
       "x": 700,
-      "y": 2791
+      "y": 2839
     },
     "cG7h02A1": {
       "index": "a4",
@@ -3920,8 +4091,7 @@
       "parentId": "z2uKZsPW",
       "style": {
         "align-items": "center",
-        "display": "flex",
-        "width": 70
+        "display": "flex"
       },
       "type": "frame"
     },
@@ -4088,6 +4258,16 @@
       },
       "type": "text"
     },
+    "mEn9tIeb": {
+      "index": "a9",
+      "name": "Cell",
+      "parentId": "z2uKZsPW",
+      "style": {
+        "align-items": "center",
+        "display": "flex"
+      },
+      "type": "frame"
+    },
     "mMYt60Do": {
       "content": "no action",
       "index": "a8",
@@ -4244,6 +4424,19 @@
       "style": {},
       "type": "text"
     },
+    "oCCxKr1v": {
+      "icon": "layers",
+      "index": "Zz",
+      "name": "Icon",
+      "parentId": "ZW3nSYnn",
+      "set": "lucide",
+      "style": {
+        "flex-shrink": 0,
+        "height": 16,
+        "width": 16
+      },
+      "type": "icon"
+    },
     "oKkWjFQz": {
       "content": "",
       "index": "a3",
@@ -4323,6 +4516,18 @@
         "padding": "8px 10px"
       },
       "type": "frame"
+    },
+    "qkgLU4wU": {
+      "content": "badge",
+      "index": "a6",
+      "parentId": "z2uKZsPW",
+      "style": {
+        "color": "{color.ink-3}",
+        "font-family": "{font.mono}",
+        "font-size": 11,
+        "white-space": "nowrap"
+      },
+      "type": "text"
     },
     "r0mbaHG0": {
       "index": "a2",
@@ -4969,6 +5174,14 @@
       },
       "type": "frame"
     },
+    "w6F33Yj8": {
+      "content": "2",
+      "index": "a0",
+      "name": "Count",
+      "parentId": "9M797n6C",
+      "style": {},
+      "type": "text"
+    },
     "w6hNp70w": {
       "index": "a1",
       "name": "Meta",
@@ -5178,7 +5391,7 @@
         "display": "grid",
         "font-family": "{font.sans}",
         "font-size": 13,
-        "grid-template-columns": "auto repeat(2, 70px)",
+        "grid-template-columns": "auto repeat(3, auto)",
         "line-height": 1.45,
         "padding": 24,
         "row-gap": 16

@@ -193,7 +193,7 @@ export const Canvas = memo(function Canvas() {
     const element = container.current;
     if (!element) return;
     const observer = new ResizeObserver(() => setTick((t) => t + 1));
-    element.querySelectorAll(".frame-host").forEach((host) => observer.observe(host));
+    for (const host of Array.from(element.querySelectorAll(".frame-host"))) observer.observe(host);
     return () => observer.disconnect();
   }, [model]);
 
@@ -938,7 +938,7 @@ export const Canvas = memo(function Canvas() {
               <FrameView
                 id={id}
                 nodes={model.nodes}
-                children={model.children}
+                childIds={model.children}
                 tokens={tokens}
                 icons={icons}
                 canvasMode={canvasMode}
@@ -974,7 +974,7 @@ function defaultFile(model: Model): string {
 
 function EmptyCanvas() {
   const setTool = useEditor((s) => s.setTool);
-  const togglePanel = useEditor((s) => s.togglePanel);
+  const showPanel = useEditor((s) => s.showPanel);
   const noneOpen = useEditor((s) => s.openFiles !== null && s.openFiles.length === 0 && Object.keys(s.files).length > 0);
   if (useEditor.getState().openFiles === null) return null;
   if (noneOpen) {
@@ -1001,7 +1001,7 @@ function EmptyCanvas() {
           <button className="btn btn-accent" onClick={() => setTool("frame")}>
             Draw a frame <kbd>F</kbd>
           </button>
-          <button className="btn" onClick={() => togglePanel("terminal", true)}>
+          <button className="btn" onClick={() => showPanel("agent")}>
             Ask your agent <kbd>{shortcut("mod+j")}</kbd>
           </button>
         </div>

@@ -6,13 +6,14 @@ import {
   motionStatesIn,
   toHtml,
 } from "@lamsa/renderer";
-import { Clapperboard, Expand, GripVertical, Maximize2, Minimize2, Minus, Plus, Play, Shrink, X } from "lucide-react";
+import { Clapperboard, Expand, GripVertical, Maximize2, Minimize2, Minus, Plus, Play, Shrink } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { assetUrl, shadowCss } from "../canvas/FrameView";
 import { cn } from "../lib/cn";
 import { isMac } from "../lib/keys";
 import { ancestorsOf, baseId, nodeTitle, rootOf } from "../lib/model";
 import { useEditor } from "../lib/store";
+import { runCommand } from "../lib/commands";
 import { PreviewFlow, type PreviewFlowHandle } from "./PreviewFlow";
 import { TransitionEditor } from "./TransitionEditor";
 
@@ -364,7 +365,9 @@ function PreviewCell({
 export function PreviewPanel() {
   const preview = useEditor((s) => s.preview);
   const closePreview = useEditor((s) => s.closePreview);
-  const terminalOpen = useEditor((s) => s.panels.terminal);
+  const fullscreen = useEditor((s) => s.previewFullscreen);
+  const setFullscreenValue = useEditor((s) => s.setPreviewFullscreen);
+  const toggleFullscreen = useCallback(() => setFullscreenValue(!useEditor.getState().previewFullscreen), [setFullscreenValue]);
   const model = useEditor((s) => s.model);
   const [order, setOrder] = useState<string[]>(preview ?? []);
   const [state, setState] = useState("rest");
@@ -375,9 +378,7 @@ export function PreviewPanel() {
   const [whole, setWhole] = useState<Set<string>>(new Set());
   const [ctrl, setCtrl] = useState(false);
   const [reports, setReports] = useState<Record<string, { states: string[]; length: number }>>({});
-  const [height, setHeight] = useState(340);
   const [zoom, setZoom] = useState(1);
-  const [fullscreen, setFullscreen] = useState(false);
   const [flowMode, setFlowMode] = useState(false);
   const [pair, setPair] = useState(0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -427,6 +428,9 @@ export function PreviewPanel() {
     };
   }, []);
 
+  // Full screen belongs to this tab: switching away from it, or closing it, leaves full screen.
+  useEffect(() => () => setFullscreenValue(false), [setFullscreenValue]);
+
   const replay = useCallback(() => setGeneration((g) => g + 1), []);
   const longest = Math.max(0, ...order.map((id) => reports[id]?.length ?? 0));
 
@@ -448,7 +452,7 @@ export function PreviewPanel() {
     });
   }, []);
 
-  if (!preview) return null;
+  if (!preview) return <PreviewEmpty />;
   const custom = [...new Set(order.flatMap((id) => reports[id]?.states ?? []))].filter((s) => !POINTER_STATES.includes(s));
   const settings: Settings = { state, speed, reduced, generation, ctrl, zoom, fullscreen };
   const zoomBy = (factor: number) => setZoom((current) => clampZoom(current * factor));
@@ -473,22 +477,9 @@ export function PreviewPanel() {
     window.addEventListener("pointerup", up);
   };
 
-  const startResize = (e: ReactPointerEvent) => {
-    const startY = e.clientY;
-    const startHeight = height;
-    const move = (event: PointerEvent) => setHeight(Math.max(200, Math.min(window.innerHeight * 0.7, startHeight + startY - event.clientY)));
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-
   return (
     <div
-      className={cn("panel panel-preview", { "is-picking": ctrl, "is-fullscreen": fullscreen })}
-      style={fullscreen ? undefined : { height, bottom: terminalOpen ? 56 + 320 + 12 : 56 }}
+      className={cn("preview", { "is-picking": ctrl })}
       tabIndex={-1}
       data-testid="preview-panel"
       onKeyDown={(e) => {
@@ -504,7 +495,7 @@ export function PreviewPanel() {
           replay();
         } else if (e.key === "f" || e.key === "F") {
           handled();
-          setFullscreen((on) => !on);
+          toggleFullscreen();
         } else if (e.key === "=" || e.key === "+") {
           handled();
           zoomBy(ZOOM_STEP);
@@ -519,15 +510,12 @@ export function PreviewPanel() {
           flowRef.current?.step(e.key === "ArrowRight" ? 1 : -1);
         } else if (e.key === "Escape") {
           e.stopPropagation();
-          if (fullscreen) setFullscreen(false);
+          if (fullscreen) setFullscreenValue(false);
           else closePreview();
         }
       }}
     >
-      {!fullscreen && <div className="preview-resize" onPointerDown={startResize} />}
-      <div className="preview-head" onDoubleClick={(e) => e.target === e.currentTarget && setFullscreen((on) => !on)}>
-        <Clapperboard size={16} className="muted" />
-        <span className="strong">Preview</span>
+      <div className="preview-head" onDoubleClick={(e) => e.target === e.currentTarget && toggleFullscreen()}>
         <span className="mono muted">
           {order.length} layer{order.length === 1 ? "" : "s"}
         </span>
@@ -544,15 +532,12 @@ export function PreviewPanel() {
         </div>
         <button
           className="icon-btn small"
-          onClick={() => setFullscreen((on) => !on)}
+          onClick={toggleFullscreen}
           aria-label={fullscreen ? "Exit full screen" : "Full screen"}
           title={fullscreen ? "Exit full screen  F" : "Full screen  F"}
           data-testid="preview-fullscreen"
         >
           {fullscreen ? <Shrink size={14} /> : <Expand size={14} />}
-        </button>
-        <button className="icon-btn small" onClick={closePreview} aria-label="Close preview">
-          <X size={16} />
         </button>
       </div>
       <div className="preview-body">
@@ -676,6 +661,28 @@ export function PreviewPanel() {
             </>
           )}
         </span>
+      </div>
+    </div>
+  );
+}
+
+/** Shown until something is picked to play: how to pick it, and a shortcut for the current selection. */
+function PreviewEmpty() {
+  const hasSelection = useEditor((s) => s.selection.length > 0);
+  return (
+    <div className="preview" data-testid="preview-panel">
+      <div className="preview-stage preview-empty" data-testid="preview-empty">
+        <div className="empty-card">
+          <Clapperboard size={24} className="empty-icon" />
+          <div className="strong">Nothing to preview</div>
+          <p className="small">
+            Select the frames or layers you want to compare, then press <kbd>P</kbd> or the play button on a frame’s label. Doing it again with
+            another selection replaces these.
+          </p>
+          <button className="btn small" disabled={!hasSelection} onClick={() => void runCommand("preview-animations")} data-testid="preview-selection">
+            <Play size={14} /> Preview selection
+          </button>
+        </div>
       </div>
     </div>
   );

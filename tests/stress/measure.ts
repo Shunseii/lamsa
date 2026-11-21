@@ -79,6 +79,33 @@ async function repeat(times: number, run: () => Promise<Sample>): Promise<Sample
 const LAYERS_PANEL = `document.querySelector('[data-testid="layers-panel"]')`;
 const PROPERTIES_PANEL = `document.querySelector('[data-testid="properties-panel"]')`;
 
+/** Scrolls the layers list one step per frame and returns the slowest frame and the long-task time. */
+export async function scrollLayers(page: Page, { axis, step, frames }: { axis: "top" | "left"; step: number; frames: number }): Promise<Sample> {
+  await begin(page);
+  const slowest = await page.evaluate(
+    async ({ axis, step, frames }) => {
+      const scroller = document.querySelector<HTMLElement>('[data-testid="layers-panel"] .panel-body')!;
+      const frame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve));
+      const property = axis === "top" ? "scrollTop" : "scrollLeft";
+      const range = axis === "top" ? scroller.scrollHeight - scroller.clientHeight : scroller.scrollWidth - scroller.clientWidth;
+      let previous = await frame();
+      let worst = 0;
+      for (let i = 1; i <= frames; i++) {
+        scroller[property] = range > 0 ? (i * step) % range : 0;
+        const now = await frame();
+        worst = Math.max(worst, now - previous);
+        previous = now;
+      }
+      scroller.scrollTop = 0;
+      scroller.scrollLeft = 0;
+      return worst;
+    },
+    { axis, step, frames },
+  );
+  const { blocked } = await settle(page, "true");
+  return { ms: Math.round(slowest), blocked };
+}
+
 export async function measureSize(size: number): Promise<Record<string, Sample>> {
   const root = makeStressProject({ nodes: size });
   const designs = ["stress-0", "stress-1"].map((name) => JSON.parse(readFileSync(join(root, `designs/${name}.lamsa.json`), "utf8")) as { nodes: Record<string, Record<string, unknown>> });
@@ -118,6 +145,9 @@ export async function measureSize(size: number): Promise<Record<string, Sample>>
       await page.waitForTimeout(300);
       return { ms: closed.ms + opened.ms, blocked: closed.blocked + opened.blocked };
     });
+
+    results["scroll layers vertically (slowest frame)"] = await repeat(RUNS, () => scrollLayers(page, { axis: "top", step: 900, frames: 60 }));
+    results["scroll layers horizontally (slowest frame)"] = await repeat(RUNS, () => scrollLayers(page, { axis: "left", step: 37, frames: 60 }));
 
     let rowIndex = 3;
     results["select layer"] = await repeat(RUNS, async () => {

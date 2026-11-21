@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { usePresenceOpen } from "./Panel";
 
 const MARGIN = 8;
 const GAP = 4;
@@ -26,7 +27,10 @@ function swallowNextClick() {
 }
 
 export function useDismiss({ ref, anchor, onClose }: { ref: React.RefObject<HTMLElement | null>; anchor?: HTMLElement | null; onClose: () => void }) {
+  // A dialog playing its exit is already closed; it mustn't swallow the next click or Escape.
+  const open = usePresenceOpen();
   useLayoutEffect(() => {
+    if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as Node;
       if (ref.current?.contains(target) || anchor?.contains(target)) return;
@@ -45,7 +49,7 @@ export function useDismiss({ ref, anchor, onClose }: { ref: React.RefObject<HTML
       window.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("keydown", onKey, true);
     };
-  }, [ref, anchor, onClose]);
+  }, [ref, anchor, onClose, open]);
 }
 
 /**

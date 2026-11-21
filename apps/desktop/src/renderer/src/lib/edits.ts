@@ -279,7 +279,7 @@ export function groupIntoFrame({
   const file = model.fileOf.get(parentId)!;
   const keys = generateNKeysBetween(null, null, ordered.length);
   const changes: NodeChange[] = [{ file, id: frameId, node: frame }];
-  ordered.forEach((id, i) => changes.push({ file, id, node: { ...model.nodes[id]!, parentId: frameId, index: keys[i] } as DesignNode }));
+  for (const [i, id] of ordered.entries()) changes.push({ file, id, node: { ...model.nodes[id]!, parentId: frameId, index: keys[i] } as DesignNode });
   return { changes, frameId };
 }
 

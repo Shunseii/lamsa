@@ -1,4 +1,4 @@
-import type { TokenMode } from "@lamsa/schema";
+import type { TokenMode, TokenSet } from "@lamsa/schema";
 import { create } from "zustand";
 import {
   isCssChange,
@@ -10,6 +10,7 @@ import {
   type ProjectSnapshot,
 } from "../../../shared/api";
 import { buildModel, iconNamesIn, type Model } from "./model";
+import { activatePanel, DEFAULT_LAYOUT, dockOf, initialShown, movePanel, readLayout, resizeDock, writeLayout, type DockId, type DockShown, type PanelId, type PanelLayout } from "./layout";
 
 declare global {
   interface Window {
@@ -33,6 +34,8 @@ export interface Toast {
   title: string;
   message?: string;
   action?: { label: string; run: () => void };
+  /** Stays until dismissed or removed by the code that raised it, instead of timing out. */
+  sticky?: boolean;
 }
 
 interface HistoryEntry {
@@ -51,14 +54,16 @@ export interface EditorState {
   hover: string | null;
   tool: Tool;
   viewport: Viewport;
-  panels: { layers: boolean; properties: boolean; terminal: boolean };
-  leftTab: "layers" | "files" | "components";
+  /** Whether each dock is shown; a dock without tabs stays collapsed either way. */
+  panels: DockShown;
+  /** Which panel is a tab in which dock, and each dock's size. Saved per user, never in design files. */
+  layout: PanelLayout;
   canvasMode: TokenMode;
   /** Editor-only prop values for previewing a main component's variants; never saved. */
   previewProps: Record<string, Record<string, string | boolean>>;
   undoStack: HistoryEntry[];
   redoStack: HistoryEntry[];
-  pending: number;
+  /** Why the last save failed; cleared by the next save that succeeds. */
   lastError?: string;
   toasts: Toast[];
   flash: Record<string, number>;
@@ -67,8 +72,12 @@ export interface EditorState {
   picker: boolean;
   contextMenu: { x: number; y: number } | null;
   renderVersion: number;
-  /** Layers playing in the animation preview, in the order they were picked; null when it's closed. */
+  /** Layers playing in the animation preview, in the order they were picked; null shows its empty state. */
   preview: string[] | null;
+  /** The preview's dock fills the canvas area. */
+  previewFullscreen: boolean;
+  /** What the preview's dock showed before the preview took it over, so closing the preview puts it back. */
+  previewReturn: { dock: DockId; shown: boolean; active: PanelId | null } | null;
   /** The keyboard shortcuts sheet. */
   help: boolean;
   /** Design files shown in the editor; null until the user picks them (the first-open prompt shows). */
@@ -88,22 +97,33 @@ interface EditorActions {
   setViewport(viewport: Viewport): void;
   togglePanel(panel: keyof EditorState["panels"], value?: boolean): void;
   toggleSidebars(): void;
-  setLeftTab(tab: EditorState["leftTab"]): void;
+  /** Opens a panel's tab, and its dock if that was hidden. */
+  showPanel(panel: PanelId): void;
+  movePanel(move: { panel: PanelId; dock: DockId; index?: number }): void;
+  setDockSize(resize: { dock: DockId; size: number | null }): void;
+  resetLayout(): void;
   setCanvasMode(mode: TokenMode): void;
   setPreviewProp(componentId: string, prop: string, value: string | boolean | undefined): void;
-  toast(toast: Omit<Toast, "id">): void;
+  /** Shows a toast and returns its id. */
+  toast(toast: Omit<Toast, "id">): number;
   dismissToast(id: number): void;
   setEditingText(id: string | null): void;
   setPicker(open: boolean): void;
   setContextMenu(menu: { x: number; y: number } | null): void;
   ensureIcons(): void;
+  /** Shows the Preview tab, playing `ids` (none shows its empty state). */
   openPreview(ids: string[]): void;
+  /** Hands the preview's dock back to what it showed before, or hides it. */
   closePreview(): void;
+  setPreviewFullscreen(fullscreen: boolean): void;
   setHelp(open: boolean): void;
   /** Loads files (absolute or repo-relative paths) into the session and shows them. */
   addFiles(paths: string[]): Promise<void>;
   setOpenFiles(paths: string[]): Promise<void>;
-  /** Opens another project in this window (folder picker when no root is given); false if nothing opened. */
+  /**
+   * Opens another project (folder picker when no root is given): here when this window is empty, otherwise in its own
+   * window. False if nothing opened in this window.
+   */
   switchProject(root?: string): Promise<boolean>;
   /** Closes the project and shows the welcome screen. */
   goHome(): Promise<void>;
@@ -111,7 +131,20 @@ interface EditorActions {
 }
 
 let toastId = 0;
+let saveErrorToast: number | undefined;
 let selectionTimer: ReturnType<typeof setTimeout> | undefined;
+
+const MAX_TOASTS = 4;
+
+/** Drops the oldest toasts that time out on their own until another fits; sticky ones stay until they're dealt with. */
+function withRoomForOneMore(toasts: Toast[]): Toast[] {
+  const kept = [...toasts];
+  while (kept.length >= MAX_TOASTS) {
+    const oldest = kept.findIndex((toast) => !toast.sticky);
+    kept.splice(oldest === -1 ? 0 : oldest, 1);
+  }
+  return kept;
+}
 
 function applyToFiles(files: Record<string, FileState>, changes: Change[]): Record<string, FileState> {
   const next = { ...files };
@@ -160,14 +193,26 @@ function withUnchangedNodesKept({ previous, next, changedIds }: { previous: File
 const emptyModel = buildModel({});
 
 export const useEditor = create<EditorState & EditorActions>((set, get) => {
+  const reportSave = (error: string | undefined) => {
+    const failing = get().lastError !== undefined;
+    set({ lastError: error });
+    if (error === undefined) {
+      if (saveErrorToast !== undefined) get().dismissToast(saveErrorToast);
+      saveErrorToast = undefined;
+      return;
+    }
+    // One toast per run of failures, not one per edit while saving keeps failing.
+    if (failing) return;
+    saveErrorToast = get().toast({ tone: "danger", title: "Couldn't save", message: error, sticky: true });
+  };
+
   const send = async (changes: Change[]) => {
-    set((s) => ({ pending: s.pending + 1 }));
     try {
       const result = await api().applyChanges(changes);
-      set({ issues: result.issues, lastError: result.ok ? undefined : result.error });
-      if (!result.ok) get().toast({ tone: "danger", title: "Couldn't save", message: result.error });
-    } finally {
-      set((s) => ({ pending: s.pending - 1 }));
+      set({ issues: result.issues });
+      reportSave(result.ok ? undefined : (result.error ?? "Unknown error"));
+    } catch (error) {
+      reportSave(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "") : String(error));
     }
   };
 
@@ -181,13 +226,14 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
     hover: null,
     tool: "select",
     viewport: { x: 80, y: 120, zoom: 1 },
-    panels: { layers: true, properties: true, terminal: false },
-    leftTab: "layers",
+    ...(() => {
+      const layout = readLayout();
+      return { layout, panels: initialShown(layout) };
+    })(),
     canvasMode: "light",
     previewProps: {},
     undoStack: [],
     redoStack: [],
-    pending: 0,
     toasts: [],
     flash: {},
     icons: {},
@@ -196,6 +242,8 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
     contextMenu: null,
     renderVersion: 0,
     preview: null,
+    previewFullscreen: false,
+    previewReturn: null,
     help: false,
     openFiles: null,
 
@@ -233,14 +281,18 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
       }
       if (!target) return false;
       const snapshot = await api().openProject(target);
-      set((s) => ({ selection: [], hover: null, preview: null, picker: false, contextMenu: null, panels: { ...s.panels, terminal: false } }));
+      // The project opened in a window of its own; this one keeps its project.
+      if (!snapshot) return false;
+      set({ selection: [], hover: null, preview: null, picker: false, contextMenu: null });
+      reportSave(undefined);
       get().loadSnapshot(snapshot);
       return true;
     },
 
     async goHome() {
       await api().closeProject();
-      set((s) => ({ selection: [], hover: null, preview: null, picker: false, contextMenu: null, undoStack: [], redoStack: [], panels: { ...s.panels, terminal: false } }));
+      set({ selection: [], hover: null, preview: null, picker: false, contextMenu: null, undoStack: [], redoStack: [] });
+      reportSave(undefined);
       get().showWelcome();
     },
 
@@ -355,10 +407,33 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
     togglePanel: (panel, value) => set((s) => ({ panels: { ...s.panels, [panel]: value ?? !s.panels[panel] } })),
     toggleSidebars: () =>
       set((s) => {
-        const open = !(s.panels.layers || s.panels.properties);
-        return { panels: { ...s.panels, layers: open, properties: open } };
+        const open = !(s.panels.left || s.panels.right);
+        return { panels: { ...s.panels, left: open, right: open } };
       }),
-    setLeftTab: (leftTab) => set({ leftTab, panels: { ...get().panels, layers: true } }),
+    showPanel: (panel) => {
+      const state = get();
+      const { layout, panels } = state;
+      const dock = dockOf(layout, panel);
+      if (!dock) return;
+      const next = activatePanel(layout, panel);
+      if (next !== layout) writeLayout(next);
+      const previewReturn = panel === "preview" && !isPreviewShown(state) ? { dock, shown: panels[dock], active: layout[dock].active } : state.previewReturn;
+      set({ layout: next, panels: { ...panels, [dock]: true }, previewReturn });
+    },
+    movePanel: ({ panel, dock, index }) => {
+      const layout = movePanel({ layout: get().layout, panel, dock, index });
+      writeLayout(layout);
+      set((s) => ({ layout, panels: { ...s.panels, [dock]: true } }));
+    },
+    setDockSize: ({ dock, size }) => {
+      const layout = resizeDock({ layout: get().layout, dock, size });
+      writeLayout(layout);
+      set({ layout });
+    },
+    resetLayout: () => {
+      writeLayout(null);
+      set({ layout: DEFAULT_LAYOUT, panels: initialShown(DEFAULT_LAYOUT), previewReturn: null, previewFullscreen: false });
+    },
     setCanvasMode: (canvasMode) => set({ canvasMode }),
     setPreviewProp: (componentId, prop, value) =>
       set((s) => {
@@ -373,15 +448,33 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
 
     toast(toast) {
       const id = ++toastId;
-      set((s) => ({ toasts: [...s.toasts.slice(-3), { ...toast, id }] }));
-      setTimeout(() => get().dismissToast(id), toast.tone === "danger" ? 9000 : 4500);
+      set((s) => ({ toasts: withRoomForOneMore(s.toasts).concat({ ...toast, id }) }));
+      if (!toast.sticky) setTimeout(() => get().dismissToast(id), toast.tone === "danger" ? 9000 : 4500);
+      return id;
     },
     dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
     setEditingText: (editingText) => set({ editingText }),
     setPicker: (picker) => set({ picker, tool: picker ? "component" : get().tool === "component" ? "select" : get().tool }),
     setContextMenu: (contextMenu) => set({ contextMenu }),
-    openPreview: (ids) => set({ preview: ids.length ? ids : null }),
-    closePreview: () => set({ preview: null }),
+    openPreview: (ids) => {
+      get().showPanel("preview");
+      set({ preview: ids.length ? ids : null });
+    },
+    closePreview: () => {
+      const state = get();
+      const { layout, panels, previewReturn } = state;
+      const dock = dockOf(layout, "preview");
+      if (!dock || !isPreviewShown(state)) return;
+      const { tabs } = layout[dock];
+      const back = previewReturn?.dock === dock ? previewReturn : null;
+      const neighbour = tabs.filter((tab) => tab !== "preview")[Math.max(0, tabs.indexOf("preview") - 1)] ?? null;
+      const restore = back ? (back.active && back.active !== "preview" && tabs.includes(back.active) ? back.active : null) : neighbour;
+      const shown = back ? back.shown : restore !== null;
+      const next = restore ? activatePanel(layout, restore) : layout;
+      if (next !== layout) writeLayout(next);
+      set({ layout: next, panels: { ...panels, [dock]: shown }, previewReturn: null, previewFullscreen: false });
+    },
+    setPreviewFullscreen: (previewFullscreen) => set({ previewFullscreen }),
     setHelp: (help) => set({ help }),
 
     async addFiles(paths) {
@@ -428,4 +521,13 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
 /** Where new top-level frames go when nothing selected says otherwise: the first open file. */
 export function firstOpenFile(state: Pick<EditorState, "openFiles" | "files">): string | undefined {
   return state.openFiles?.[0] ?? Object.keys(state.files)[0];
+}
+
+/** Whether the Preview tab is the open tab of a dock that's on screen. */
+/** Whether the app's CSS gives any token a dark value; without one, light and dark draw the same. */
+export const hasDarkTokens = (tokens: TokenSet | undefined) => Object.values(tokens?.tokens ?? {}).some((token) => token.values.dark !== undefined);
+
+export function isPreviewShown(state: Pick<EditorState, "layout" | "panels">): boolean {
+  const dock = dockOf(state.layout, "preview");
+  return dock !== null && state.panels[dock] && state.layout[dock].tabs.length > 0 && state.layout[dock].active === "preview";
 }

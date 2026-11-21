@@ -19,7 +19,7 @@ License: MIT. The business, if any, is hosting later; the format, CLI, and deskt
 - Every command is non-interactive. Nothing prompts; anything that would ask has a flag (`--yes`, `--force`) and a safe default. No login, ever.
 - First-run setup is scriptable: `lamsa init --agent <name> --yes` writes config, skill, and `AGENTS.md`; `lamsa render` downloads Chromium without asking when no system Chrome exists (opt out with an env var).
 - Everything the editor can show, the CLI can produce: PNG renders, `tree`, `diff`, `tokens`, `components`, validation with node IDs.
-- `lamsa open [file] [--select <id>]` lets the agent show the user something. It launches the desktop app, or, if it's already running, forwards the request to the running instance (Electron single-instance handoff, not a daemon). Opening is always optional and never needed for any other command to work.
+- `lamsa open [file] [--select <id>]` lets the agent show the user something. It launches the desktop app, or, if it's already running, forwards the request to the running instance (Electron single-instance handoff, not a daemon). Each project gets its own window: a project that's already open has its window brought forward and the file and selection applied there; any other project opens in a new window (or an empty one), and a window showing another project is never replaced. The same project never opens in two windows, including from the project menu, recent projects, or the folder picker, which use the current window only when it has no project. Each window has its own file watcher and agent chat, so closing or switching one leaves the others alone. Opening is always optional and never needed for any other command to work.
 - The desktop app takes its file and selection from argv, so agents and scripts can launch it directly.
 - **lamsa itself is agent-testable:** the CLI runs fully headless in CI; the desktop app is driven end to end with Playwright's Electron support, so a coding agent can build and verify the editor without a person checking screens.
 
@@ -33,7 +33,7 @@ See [Competitors](#competitors) at the end.
 
 - One file per page or board (`*.lamsa.json`), holding any number of screens and components. Users split and organise files freely.
 - Each file has a top-level `version`. `lamsa migrate` upgrades files; the CLI refuses files newer than itself.
-- Config (`lamsa.config.json`) holds globs for design files and components (monorepo friendly), the token adapter, `assetsDir`, and the agent command for the embedded terminal.
+- Config (`lamsa.config.json`) holds globs for design files and components (monorepo friendly), the token adapter, `assetsDir`, and the agent command for the chat and terminal.
 
 ### Nodes
 
@@ -143,9 +143,13 @@ Later: create component from selection, visual gradient/shadow/mask editors, rot
 
 ### In-app AI
 
-An embedded terminal pane (`node-pty` + xterm.js) running the user's own agent CLI (configurable command, default `claude`), plus "open in external terminal". It is a visible, interactive session the user drives. lamsa never touches the agent's credentials and ships no chat UI or API-key flow.
+An Agent tab in the editor chats with the user's own agent CLI (configurable command, default `claude`). lamsa runs it headless with structured output (`claude -p --output-format stream-json`, `--session-id` for the first turn, `--resume` after) in the project root and draws the stream as chat: messages, tool steps, and a card listing the layers that changed, each one selectable on the canvas. Selected layers go along as context without being shown in the message box. Pasting copied layers or layer ids into the message box turns them into inline layer pills, sent as `[Name](lamsa:id)` links and drawn as pills in the thread that select the layer. One small parser per agent turns its output into chat events; Claude is the first.
 
-Before launch: confirm the embedded-terminal approach is consistent with agent vendors' terms.
+Past conversations are read from the agent's own session storage (for Claude Code, `~/.claude/projects/<project>/*.jsonl`), so lamsa keeps no conversation store; it only records which layers each chat turn changed, in `.lamsa/agent-sessions.json`.
+
+"Continue in terminal" (`⌘J`) opens the user's own terminal (`$TERMINAL`, else the first one found) running `claude --resume <session>` in the project root. One session has one writer: while it's open there, the chat pauses and picks up afterwards with everything said in the terminal. Agents without structured output skip chat and open in the terminal. lamsa never touches the agent's credentials and ships no API-key flow.
+
+Before launch: confirm with agent vendors' terms that driving their CLI headlessly on a subscription login (e.g. `claude -p` on a claude.ai plan) is allowed.
 
 ## Pull request review
 
@@ -166,7 +170,7 @@ A pnpm monorepo, all TypeScript, so the CLI and the editor share one core and va
 ## Build phases
 
 1. **Agent-only.** Schema, core, renderer, CLI (`init`, `fmt`, `validate`, `render`, `tree`, `add --tree`, `tokens`), agent skill. Useful on day one: the agent designs, `lamsa render` makes PNGs, review happens in PRs. Proves the format before an editor depends on it.
-2. **Read-only viewer.** Electron canvas with live reload, pan/zoom, layers tree, selection writing `session.json`, terminal pane.
+2. **Read-only viewer.** Electron canvas with live reload, pan/zoom, layers tree, selection writing `session.json`, agent chat.
 3. **Editing.** Properties panel, direct manipulation, undo, the rest of the v1 editing surface.
 4. **GitHub Action** for PR previews.
 

@@ -96,9 +96,10 @@ export function setTransitionDeclaration(
   rule.walkDecls(property, (decl) => {
     existing.push(decl);
   });
-  if (!value.trim()) existing.forEach((decl) => decl.remove());
-  else if (existing.length) {
-    existing.slice(0, -1).forEach((decl) => decl.remove());
+  if (!value.trim()) {
+    for (const decl of existing) decl.remove();
+  } else if (existing.length) {
+    for (const decl of existing.slice(0, -1)) decl.remove();
     existing.at(-1)!.value = value.trim();
   } else rule.append({ prop: property, value: value.trim() });
   if (!rule.nodes.length) rule.remove();

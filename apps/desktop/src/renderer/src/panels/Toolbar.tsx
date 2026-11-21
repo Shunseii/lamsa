@@ -1,7 +1,7 @@
 import { useShallow } from "zustand/react/shallow";
 import {
   ChevronDown,
-  Clapperboard,
+  Ellipsis,
   Component,
   Frame,
   Hand,
@@ -10,6 +10,7 @@ import {
   Keyboard,
   Moon,
   MousePointer2,
+  PanelBottom,
   PanelLeft,
   PanelRight,
   Square,
@@ -20,7 +21,8 @@ import {
 } from "lucide-react";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { insertNodes, newId } from "../lib/edits";
-import { api, firstOpenFile, useEditor, type Tool } from "../lib/store";
+import { api, firstOpenFile, hasDarkTokens, useEditor, type Tool } from "../lib/store";
+import type { DockId } from "../lib/layout";
 import { fitTo, zoomBy, zoomTo } from "../lib/viewport";
 import { shortcut } from "../lib/keys";
 import { LogoMark } from "./LogoMark";
@@ -28,11 +30,46 @@ import { ProjectMenu } from "./ProjectMenu";
 import { IconPicker, useIconNames } from "./IconField";
 import { Popover } from "./Popover";
 import { cn } from "../lib/cn";
-import { runCommand } from "../lib/commands";
+import { useAgent } from "../lib/agent";
 
-export function Tip({ label, keys, hint, children }: { label: string; keys?: string; hint?: [string, string]; children: ReactNode }) {
+/** After a tooltip has shown, the next one opens at once, until the pointer has been off tooltip targets for a moment. */
+const TIP_COOLDOWN_MS = 400;
+let coolDown: ReturnType<typeof setTimeout> | undefined;
+
+const warmTips = () => {
+  clearTimeout(coolDown);
+  document.body.dataset.tipsWarm = "";
+};
+/** Its delayed `visibility` transition ending means this tooltip just appeared; other transitions in the target don't count. */
+const onTipShown = (event: TransitionEvent) => {
+  if ((event.target as Element).classList.contains("tip")) warmTips();
+};
+const coolTips = () => {
+  clearTimeout(coolDown);
+  coolDown = setTimeout(() => delete document.body.dataset.tipsWarm, TIP_COOLDOWN_MS);
+};
+
+/**
+ * A tooltip: it opens after a short rest on its target (styles.css), then instantly on neighbours while warm, and a press
+ * hides it until the pointer leaves.
+ */
+export function Tip({ label, keys, hint, className, children }: { label: string; keys?: string; hint?: [string, string]; className?: string; children: ReactNode }) {
   return (
-    <span className="tip-wrap">
+    <span
+      className={cn("tip-wrap", className)}
+      onPointerEnter={(e) => {
+        if (document.body.dataset.tipsWarm !== undefined) warmTips();
+        else e.currentTarget.addEventListener("transitionend", onTipShown);
+      }}
+      onPointerLeave={(e) => {
+        e.currentTarget.removeEventListener("transitionend", onTipShown);
+        delete e.currentTarget.dataset.pressed;
+        if (document.body.dataset.tipsWarm !== undefined) coolTips();
+      }}
+      onPointerDown={(e) => {
+        e.currentTarget.dataset.pressed = "";
+      }}
+    >
       {children}
       <span className="tip" role="tooltip">
         <span className="tip-row">
@@ -91,16 +128,45 @@ export async function insertIcon(name: string) {
   select([id]);
 }
 
+export const DOCK_TOGGLES: Record<DockId, { name: string; keys: string; icon: ReactNode }> = {
+  left: { name: "left panel", keys: shortcut("mod+["), icon: <PanelLeft size={16} /> },
+  right: { name: "right panel", keys: shortcut("mod+]"), icon: <PanelRight size={16} /> },
+  centre: { name: "bottom panel", keys: shortcut("mod+'"), icon: <PanelBottom size={16} /> },
+};
+
+/** Shows or hides a dock. A dock whose tabs were all dragged elsewhere has nothing to show. */
+function DockToggle({ dock, className }: { dock: DockId; className?: string }) {
+  const { shown, empty } = useEditor(useShallow((s) => ({ shown: s.panels[dock], empty: s.layout[dock].tabs.length === 0 })));
+  const { name, keys, icon } = DOCK_TOGGLES[dock];
+  return (
+    <Tip className={className} label={empty ? `The ${name} is empty` : shown ? `Hide ${name}` : `Show ${name}`} keys={keys} hint={dock === "centre" ? undefined : ["Focus mode", shortcut("mod+\\")]}>
+      <button
+        className={cn("icon-btn", { "is-active": shown && !empty })}
+        onClick={() => useEditor.getState().togglePanel(dock)}
+        disabled={empty}
+        aria-label={`Toggle ${name}`}
+        data-testid={`toggle-${dock}-dock`}
+      >
+        {icon}
+      </button>
+    </Tip>
+  );
+}
+
 export function Toolbar() {
-  const { snapshot, tool, setTool, panels, togglePanel, canvasMode, setCanvasMode, viewport, selection, model, toast, previewOpen, closePreview, help, setHelp } = useEditor(
-    useShallow((s) => ({ snapshot: s.snapshot, tool: s.tool, setTool: s.setTool, panels: s.panels, togglePanel: s.togglePanel, canvasMode: s.canvasMode, setCanvasMode: s.setCanvasMode, viewport: s.viewport, selection: s.selection, model: s.model, toast: s.toast, previewOpen: s.preview !== null, closePreview: s.closePreview, help: s.help, setHelp: s.setHelp })),
+  const { snapshot, tool, setTool, canvasMode, setCanvasMode, viewport, selection, model, toast, bottomShown, bottomEmpty, help, setHelp } = useEditor(
+    useShallow((s) => ({ snapshot: s.snapshot, tool: s.tool, setTool: s.setTool, canvasMode: s.canvasMode, setCanvasMode: s.setCanvasMode, viewport: s.viewport, selection: s.selection, model: s.model, toast: s.toast, bottomShown: s.panels.centre, bottomEmpty: s.layout.centre.tabs.length === 0, help: s.help, setHelp: s.setHelp })),
   );
   const [zoomOpen, setZoomOpen] = useState(false);
   const zoomButton = useRef<HTMLButtonElement>(null);
   const closeZoom = useCallback(() => setZoomOpen(false), []);
   const [rendering, setRendering] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreButton = useRef<HTMLButtonElement>(null);
+  const closeMore = useCallback(() => setMoreOpen(false), []);
 
   const [iconOpen, setIconOpen] = useState(false);
+  const hasDark = hasDarkTokens(snapshot?.tokens);
   const iconButton = useRef<HTMLButtonElement>(null);
   const closeIcons = useCallback(() => setIconOpen(false), []);
   const iconNames = useIconNames();
@@ -128,7 +194,7 @@ export function Toolbar() {
     if (roots.length === 0) return;
     setRendering(true);
     try {
-      const results = await api().render(roots, canvasMode);
+      const results = await api().render(roots, hasDark ? canvasMode : "light");
       const first = results[0];
       toast({
         tone: "ok",
@@ -145,15 +211,12 @@ export function Toolbar() {
 
   return (
     <div className="topbar">
+      <div className="topbar-row">
       <div className="bar bar-project">
         <LogoMark />
         <ProjectMenu />
         <span className="bar-divider" />
-        <Tip label={panels.layers ? "Hide layers" : "Show layers"} keys={shortcut("mod+[")} hint={["Focus mode", shortcut("mod+\\")]}>
-          <button className={cn("icon-btn", { "is-active": panels.layers })} onClick={() => togglePanel("layers")} aria-label="Toggle layers">
-            <PanelLeft size={16} />
-          </button>
-        </Tip>
+        <DockToggle dock="left" />
       </div>
 
       <div className="bar bar-tools">
@@ -185,14 +248,34 @@ export function Toolbar() {
       </div>
 
       <div className="bar bar-view">
-        <div className="segmented">
-          <button className={canvasMode === "light" ? "is-on" : ""} onClick={() => setCanvasMode("light")}>
-            <Sun size={14} /> <span className="wide-only">Light</span>
-          </button>
-          <button className={canvasMode === "dark" ? "is-on" : ""} onClick={() => setCanvasMode("dark")}>
-            <Moon size={14} /> <span className="wide-only">Dark</span>
-          </button>
-        </div>
+        {hasDark ? (
+          <>
+            <Tip className="view-compact" label={canvasMode === "light" ? "Switch canvas to dark" : "Switch canvas to light"}>
+              <button
+                className="icon-btn"
+                onClick={() => setCanvasMode(canvasMode === "light" ? "dark" : "light")}
+                aria-label="Toggle canvas mode"
+                data-testid="canvas-mode-toggle"
+              >
+                {canvasMode === "light" ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
+            </Tip>
+            <div className="segmented view-full">
+              <button className={canvasMode === "light" ? "is-on" : ""} onClick={() => setCanvasMode("light")}>
+                <Sun size={14} /> <span className="wide-only">Light</span>
+              </button>
+              <button className={canvasMode === "dark" ? "is-on" : ""} onClick={() => setCanvasMode("dark")}>
+                <Moon size={14} /> <span className="wide-only">Dark</span>
+              </button>
+            </div>
+          </>
+        ) : (
+          <Tip label={`No dark tokens. Add a .dark block to ${snapshot?.tokens.source ?? "your token CSS"}.`}>
+            <span className="mode-label" data-testid="canvas-mode-label">
+              <Sun size={14} /> <span className="wide-only">Light only</span>
+            </span>
+          </Tip>
+        )}
         <div className="zoom">
           <button ref={zoomButton} className="ghost-btn" onClick={() => setZoomOpen(!zoomOpen)}>
             {Math.round(viewport.zoom * 100)}% <ChevronDown size={14} />
@@ -219,35 +302,74 @@ export function Toolbar() {
             </Popover>
           )}
         </div>
-        <Tip label={previewOpen ? "Close animation preview" : selection.length ? "Preview animations" : "Select a layer to preview its animations"} keys="P">
-          <button
-            className={cn("icon-btn", { "is-active": previewOpen })}
-            onClick={() => (previewOpen ? closePreview() : void runCommand("preview-animations"))}
-            disabled={!previewOpen && selection.length === 0}
-            aria-label="Toggle animation preview"
-            data-testid="toggle-preview"
-          >
-            <Clapperboard size={16} />
-          </button>
-        </Tip>
-        <Tip label={panels.terminal ? "Hide agent terminal" : "Show agent terminal"} keys={shortcut("mod+j")}>
-          <button className={cn("icon-btn", { "is-active": panels.terminal })} onClick={() => togglePanel("terminal")} aria-label="Toggle terminal">
+        <Tip className="view-full" label="Continue in your terminal" keys={shortcut("mod+j")}>
+          <button className="icon-btn" onClick={() => void useAgent.getState().openTerminal()} aria-label="Continue in terminal" data-testid="toolbar-terminal">
             <SquareTerminal size={16} />
           </button>
         </Tip>
-        <Tip label={panels.properties ? "Hide properties" : "Show properties"} keys={shortcut("mod+]")} hint={["Focus mode", shortcut("mod+\\")]}>
-          <button className={cn("icon-btn", { "is-active": panels.properties })} onClick={() => togglePanel("properties")} aria-label="Toggle properties">
-            <PanelRight size={16} />
-          </button>
-        </Tip>
-        <Tip label="Keyboard shortcuts" keys="?">
+        <DockToggle dock="centre" className="view-full" />
+        <DockToggle dock="right" />
+        <Tip className="view-full" label="Keyboard shortcuts" keys="?">
           <button className={cn("icon-btn", { "is-active": help })} onClick={() => setHelp(!help)} aria-label="Keyboard shortcuts" data-testid="open-shortcuts">
             <Keyboard size={16} />
           </button>
         </Tip>
-        <button className="btn" onClick={() => void render()} disabled={rendering}>
+        <button className="btn view-full" onClick={() => void render()} disabled={rendering}>
           <ImagePlay size={14} /> <span className="wide-only">{rendering ? "Rendering…" : "Render"}</span>
         </button>
+        <Tip className="view-compact" label="More">
+          <button
+            ref={moreButton}
+            className={cn("icon-btn", { "is-active": moreOpen })}
+            onClick={() => setMoreOpen(!moreOpen)}
+            aria-label="More"
+            data-testid="view-more"
+          >
+            <Ellipsis size={16} />
+          </button>
+        </Tip>
+        {moreOpen && (
+          <Popover anchor={moreButton.current} width={240} onClose={closeMore} testId="view-more-menu">
+            {[
+              {
+                label: bottomShown ? "Hide bottom panel" : "Show bottom panel",
+                icon: <PanelBottom size={14} className="muted" />,
+                keys: DOCK_TOGGLES.centre.keys,
+                disabled: bottomEmpty,
+                run: () => useEditor.getState().togglePanel("centre"),
+              },
+              { label: "Continue in your terminal", icon: <SquareTerminal size={14} className="muted" />, keys: shortcut("mod+j"), run: () => void useAgent.getState().openTerminal() },
+              { label: "Keyboard shortcuts", icon: <Keyboard size={14} className="muted" />, keys: "?", run: () => setHelp(!help) },
+            ].map((item) => (
+              <button
+                key={item.label}
+                className="menu-item"
+                disabled={item.disabled}
+                onClick={() => {
+                  setMoreOpen(false);
+                  item.run();
+                }}
+              >
+                {item.icon}
+                {item.label}
+                <kbd>{item.keys}</kbd>
+              </button>
+            ))}
+            <div className="menu-sep" />
+            <button
+              className="menu-item"
+              disabled={rendering}
+              onClick={() => {
+                setMoreOpen(false);
+                void render();
+              }}
+            >
+              <ImagePlay size={14} className="muted" />
+              {rendering ? "Rendering…" : "Render"}
+            </button>
+          </Popover>
+        )}
+      </div>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { useShallow } from "zustand/react/shallow";
 import { TriangleAlert } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect } from "react";
 import { Canvas } from "./canvas/Canvas";
 import { installShortcuts } from "./lib/commands";
 import { api, useEditor } from "./lib/store";
@@ -10,14 +10,12 @@ import type { OpenRequest } from "../../shared/api";
 import { ComponentPicker } from "./panels/ComponentPicker";
 import { ContextMenu } from "./panels/ContextMenu";
 import { localFontCss } from "./canvas/FrameView";
-import { LayersPanel } from "./panels/LayersPanel";
+import { Docks } from "./panels/Dock";
 import { LogoMark } from "./panels/LogoMark";
-import { PreviewPanel } from "./panels/PreviewPanel";
-import { PropertiesPanel } from "./panels/PropertiesPanel";
+import { Presence } from "./panels/Panel";
+import { DockSizeStyle } from "./panels/PanelResize";
 import { OpenFilesDialog } from "./panels/OpenFilesDialog";
 import { ShortcutsHelp } from "./panels/ShortcutsHelp";
-import { StatusBar } from "./panels/StatusBar";
-import { TerminalPanel } from "./panels/TerminalPanel";
 import { Toasts } from "./panels/Toasts";
 import { Toolbar } from "./panels/Toolbar";
 import { Welcome } from "./panels/Welcome";
@@ -42,7 +40,9 @@ function useFonts() {
       added.push(style);
     }
     void document.fonts.ready.then(() => useEditor.setState((s) => ({ renderVersion: s.renderVersion + 1 })));
-    return () => added.forEach((element) => element.remove());
+    return () => {
+      for (const element of added) element.remove();
+    };
   }, [snapshot]);
 }
 
@@ -62,8 +62,17 @@ async function handleOpenRequest(request: OpenRequest) {
 }
 
 export function App() {
-  const { screen, panels, picker, files, help, choosingFiles } = useEditor(
-    useShallow((s) => ({ screen: s.screen, panels: s.panels, picker: s.picker, files: s.files, help: s.help, choosingFiles: s.openFiles === null })),
+  const { screen, hasLeft, hasRight, hasCentre, picker, files, help, choosingFiles } = useEditor(
+    useShallow((s) => ({
+      screen: s.screen,
+      hasLeft: s.panels.left && s.layout.left.tabs.length > 0,
+      hasRight: s.panels.right && s.layout.right.tabs.length > 0,
+      hasCentre: s.panels.centre && s.layout.centre.tabs.length > 0,
+      picker: s.picker,
+      files: s.files,
+      help: s.help,
+      choosingFiles: s.openFiles === null,
+    })),
   );
   useFonts();
 
@@ -85,7 +94,9 @@ export function App() {
       }),
       installShortcuts(),
     ];
-    return () => offs.forEach((off) => off());
+    return () => {
+      for (const off of offs) off();
+    };
   }, []);
 
   if (screen === "loading") {
@@ -101,7 +112,8 @@ export function App() {
   const invalid = Object.values(files).filter((f) => f.error && f.error !== "deleted");
 
   return (
-    <div className={cn("editor", { "has-left": panels.layers, "has-right": panels.properties, "has-terminal": panels.terminal })}>
+    <div className={cn("editor", { "has-left": hasLeft, "has-right": hasRight, "has-centre": hasCentre })}>
+      <DockSizeStyle />
       <Canvas />
       <Toolbar />
       {invalid.length > 0 && (
@@ -115,17 +127,7 @@ export function App() {
           </div>
         </div>
       )}
-      <Presence open={panels.layers}>
-        <LayersPanel />
-      </Presence>
-      <Presence open={panels.properties}>
-        <PropertiesPanel />
-      </Presence>
-      <Presence open={panels.terminal}>
-        <TerminalPanel />
-      </Presence>
-      <PreviewPanel />
-      <StatusBar />
+      <Docks />
       <ContextMenu />
       {picker && <ComponentPicker />}
       <Toasts />
@@ -135,28 +137,6 @@ export function App() {
       <Presence open={choosingFiles}>
         <OpenFilesDialog />
       </Presence>
-    </div>
-  );
-}
-
-/** How long a closing panel or dialog stays mounted so its exit transition (styles.css) can play. */
-const PANEL_EXIT_MS = 140;
-
-/** Keeps a panel or dialog mounted for its exit transition; `data-state` drives the CSS. */
-function Presence({ open, children }: { open: boolean; children: ReactNode }) {
-  const [mounted, setMounted] = useState(open);
-  useEffect(() => {
-    if (open) {
-      setMounted(true);
-      return;
-    }
-    const timer = setTimeout(() => setMounted(false), PANEL_EXIT_MS);
-    return () => clearTimeout(timer);
-  }, [open]);
-  if (!open && !mounted) return null;
-  return (
-    <div className="presence" data-state={open ? "open" : "closed"}>
-      {children}
     </div>
   );
 }

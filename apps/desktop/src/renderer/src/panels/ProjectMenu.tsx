@@ -1,8 +1,9 @@
-import { ChevronDown, FolderOpen, House } from "lucide-react";
+import { ChevronDown, FolderOpen, House, LayoutDashboard, Palette } from "lucide-react";
 import { useRef, useState } from "react";
 import type { RecentProject } from "../../../shared/api";
 import { shortcut } from "../lib/keys";
 import { api, useEditor } from "../lib/store";
+import { runCommand } from "../lib/commands";
 import { fitTo } from "../lib/viewport";
 import { Popover } from "./Popover";
 
@@ -16,6 +17,8 @@ export function ProjectMenu() {
   const name = useEditor((s) => s.snapshot?.name);
   const root = useEditor((s) => s.snapshot?.root);
   const goHome = useEditor((s) => s.goHome);
+  const tokens = useEditor((s) => s.snapshot?.tokens);
+  const tokenError = useEditor((s) => s.snapshot?.tokenError);
   const button = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [recent, setRecent] = useState<RecentProject[]>([]);
@@ -68,6 +71,18 @@ export function ProjectMenu() {
             <div className="menu-sep" />
             <button
               className="menu-item"
+              data-testid="reset-panel-layout"
+              onClick={() => {
+                setOpen(false);
+                void runCommand("reset-panel-layout");
+              }}
+            >
+              <LayoutDashboard size={14} className="muted" />
+              Reset panel layout
+              <kbd>{shortcut("mod+alt+0")}</kbd>
+            </button>
+            <button
+              className="menu-item"
               data-testid="go-home"
               onClick={() => {
                 setOpen(false);
@@ -77,6 +92,20 @@ export function ProjectMenu() {
               <House size={14} className="muted" />
               Back to home
             </button>
+            {tokens && (
+              <>
+                <div className="menu-sep" />
+                <div className="menu-info" data-testid="project-tokens" title={tokenError}>
+                  <Palette size={14} />
+                  <span className="menu-info-text">
+                    <span className="truncate">
+                      {tokenError ? "Tokens failed to load" : `${tokens.adapter} · ${Object.keys(tokens.tokens).length} tokens`}
+                    </span>
+                    {tokens.source && <span className="mono small truncate">{tokens.source}</span>}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </Popover>
       )}

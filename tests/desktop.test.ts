@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron, type ElectronApplication, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { copyExample } from "./helpers.js";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const CLI = join(repo, "packages/cli/dist/cli.js");
@@ -14,20 +15,6 @@ const ELECTRON = join(DESKTOP, "node_modules/electron/dist/electron");
 let root: string;
 let app: ElectronApplication;
 let page: Page;
-
-/** The example project as committed, so local experiments in examples/ don't change test results. */
-function copyExample(dest: string, { openAll = true }: { openAll?: boolean } = {}) {
-  const archive = spawnSync("git", ["archive", "HEAD", "examples/shadcn-app"], { cwd: repo, maxBuffer: 64 * 1024 * 1024 });
-  const untar = spawnSync("tar", ["-x", "-C", dest, "--strip-components=2"], { input: archive.stdout });
-  if (archive.status !== 0 || untar.status !== 0) throw new Error(`could not copy the example: ${archive.stderr}${untar.stderr}`);
-  // The motion showcase is for people trying the example; the tests' canvas positions and file counts assume the other two files.
-  rmSync(join(dest, "designs/motion.lamsa.json"), { force: true });
-  if (!openAll) return;
-  // Most tests want every file open, as if the user had already answered the first-open prompt.
-  const designs = readdirSync(join(dest, "designs")).filter((name) => name.endsWith(".lamsa.json"));
-  mkdirSync(join(dest, ".lamsa"), { recursive: true });
-  writeFileSync(join(dest, ".lamsa/session.json"), JSON.stringify({ selection: [], open: designs.map((name) => `designs/${name}`) }));
-}
 
 function lamsa(...args: string[]) {
   const result = spawnSync(process.execPath, [CLI, "--json", ...args], { cwd: root, encoding: "utf8" });
@@ -42,9 +29,6 @@ describe("desktop editor", () => {
   beforeAll(async () => {
     root = mkdtempSync(join(tmpdir(), "lamsa-desktop-"));
     copyExample(root);
-    const config = JSON.parse(readFileSync(join(root, "lamsa.config.json"), "utf8"));
-    config.agent = { command: "sh", args: ["-c", "echo lamsa-agent-ready; cat"] };
-    writeFileSync(join(root, "lamsa.config.json"), JSON.stringify(config, null, 2));
     app = await _electron.launch({
       executablePath: ELECTRON,
       args: [DESKTOP, "--root", root, "--select", "QkpksTeC"],
@@ -110,10 +94,182 @@ describe("desktop editor", () => {
     await page.getByTestId("invalid-banner").waitFor({ state: "detached" });
   });
 
-  it("runs the configured agent in the terminal pane", async () => {
-    await page.keyboard.press("Control+j");
-    await page.getByTestId("terminal-panel").waitFor();
-    await expect.poll(() => page.locator(".xterm-rows").textContent(), { timeout: 10_000 }).toContain("lamsa-agent-ready");
+  it("counts problems on the Files tab while a design file is invalid, wherever the tab is docked", async () => {
+    const file = join(root, "designs/components.lamsa.json");
+    const good = readFileSync(file, "utf8");
+    const filesTab = page.locator('[data-panel-tab="files"]');
+    const badge = page.getByTestId("files-tab-badge");
+    expect(await badge.count()).toBe(0);
+    expect(await filesTab.getAttribute("aria-label")).toBe("Files");
+
+    writeFileSync(file, good.slice(0, 40));
+    await page.getByTestId("dock-left").getByTestId("files-tab-badge").waitFor();
+    // The broken file itself, plus the errors its loss causes in files that use its components.
+    const count = Number(await badge.textContent());
+    expect(count).toBeGreaterThanOrEqual(1);
+    expect(await filesTab.getAttribute("aria-label")).toBe(`Files · ${count} problem${count === 1 ? "" : "s"}`);
+
+    await filesTab.focus();
+    await page.keyboard.press("Shift+F10");
+    await page.getByTestId("panel-tab-menu").locator('[data-dock-target="right"]').click();
+    await page.getByTestId("dock-right").getByTestId("files-tab-badge").waitFor();
+    expect(await page.getByTestId("dock-left").getByTestId("files-tab-badge").count()).toBe(0);
+
+    writeFileSync(file, good);
+    await badge.waitFor({ state: "detached" });
+    expect(await filesTab.getAttribute("aria-label")).toBe("Files");
+    await page.getByTestId("canvas").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("Control+Alt+0");
+    await page.getByTestId("dock-left").locator('[data-panel-tab="files"]').waitFor();
+  });
+
+  it("shows one error toast while saves keep failing, and clears it once a save goes through", async () => {
+    const designs = join(root, "designs");
+    const failed = page.getByTestId("toasts").locator(".toast-danger", { hasText: "Couldn't save" });
+    await page.getByTestId("layers-panel").getByText("Summary", { exact: true }).click();
+    const padding = page.getByTestId("properties-panel").locator(".field", { hasText: /^padding$/ }).locator("input").first();
+    // Saves write a temp file beside the design and rename it over, so a read-only folder makes them fail.
+    chmodSync(designs, 0o555);
+    try {
+      for (const value of ["9", "10", "11"]) {
+        await padding.fill(value);
+        await padding.press("Enter");
+      }
+      await failed.waitFor();
+      await page.waitForTimeout(500);
+      expect(await failed.count()).toBe(1);
+      expect(await failed.textContent()).toContain("permission denied");
+    } finally {
+      chmodSync(designs, 0o755);
+    }
+    await padding.fill("12");
+    await padding.press("Enter");
+    await failed.waitFor({ state: "detached" });
+    await expect.poll(() => readDesign("checkout.lamsa.json").nodes.ddPB6Wpj?.style).toMatchObject({ padding: 12 });
+  });
+
+  it("shows the token adapter, count and source in the project menu", async () => {
+    await page.getByTestId("project-menu").click();
+    const line = page.getByTestId("project-tokens");
+    await expect.poll(() => line.textContent()).toMatch(/shadcn-tailwind4 · [1-9]\d* tokens/);
+    expect(await line.textContent()).toContain("app/globals.css");
+    await page.keyboard.press("Escape");
+    await page.getByTestId("project-menu-list").waitFor({ state: "detached" });
+  });
+
+  it("swaps the light/dark switch for a 'Light only' label while the token CSS has no dark block", async () => {
+    const css = join(root, "app/globals.css");
+    const withDark = readFileSync(css, "utf8");
+    const darkBlock = /\n\.dark \{[^}]*\}\n/;
+    expect(withDark).toMatch(darkBlock);
+    await expect.poll(() => page.getByTestId("canvas-mode-toggle").count()).toBe(1);
+    expect(await page.getByTestId("canvas-mode-label").count()).toBe(0);
+
+    writeFileSync(css, withDark.replace(darkBlock, "\n"));
+    await page.getByTestId("canvas-mode-label").waitFor({ state: "attached" });
+    expect(await page.getByTestId("canvas-mode-toggle").count()).toBe(0);
+    expect(await page.locator(".bar-view .segmented").count()).toBe(0);
+    expect(await page.getByTestId("canvas-mode-label").textContent()).toContain("Light only");
+    expect(await page.locator(".bar-view .tip").first().textContent()).toContain("Add a .dark block to app/globals.css");
+
+    writeFileSync(css, withDark);
+    await page.getByTestId("canvas-mode-toggle").waitFor({ state: "attached" });
+    expect(await page.getByTestId("canvas-mode-label").count()).toBe(0);
+  });
+
+  it("keeps the tools centred without overlaps as the window narrows: the view bar drops its labels, then folds into More", async () => {
+    const resize = (width: number) =>
+      app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0]!.setContentSize(size, 800), width);
+    // A long project name is the widest the project bar gets before its name truncates.
+    await page.locator(".project-name").evaluate((element) => (element.textContent = "checkout-redesign-2026-final-review"));
+    const folded = new Set<boolean>();
+    for (let width = 800; width <= 1440; width += 4) {
+      await resize(width);
+      await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(width);
+      const measured = await page.evaluate(() => {
+        const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+        const topbar = box(".topbar");
+        const [project, tools, view] = [box(".bar-project"), box(".bar-tools"), box(".bar-view")];
+        const toolsCentre = tools.left + tools.width / 2;
+        return {
+          fits: project.right <= tools.left && tools.right <= view.left && project.left >= topbar.left && view.right <= topbar.right + 0.5,
+          centred: Math.abs(toolsCentre - (topbar.left + topbar.width / 2)) < 1,
+          compact: document.querySelector('[data-testid="view-more"]')!.getBoundingClientRect().width > 0,
+        };
+      });
+      expect(measured.fits, `bars overlap at ${width}px`).toBe(true);
+      expect(measured.centred, `tools off-centre at ${width}px`).toBe(true);
+      folded.add(measured.compact);
+    }
+    expect([...folded].sort()).toEqual([false, true]);
+
+    await resize(820);
+    await page.getByTestId("view-more").click();
+    await page.getByTestId("view-more-menu").getByText("Keyboard shortcuts").click();
+    await page.getByTestId("shortcuts-help").waitFor();
+    await page.keyboard.press("Escape");
+    await resize(1440);
+  });
+
+  it("resizes the left panel by its edge within limits, remembers it, and resets on double-click", async () => {
+    const panel = page.getByTestId("dock-left");
+    const storedLeft = () => page.evaluate(() => JSON.parse(localStorage.getItem("lamsa.panelLayout") ?? "{}").left?.size ?? null);
+    const handle = page.getByTestId("left-panel-resize");
+    const widthOf = () => panel.evaluate((element) => Math.round(element.getBoundingClientRect().width));
+    const before = await widthOf();
+    const drag = async (dx: number) => {
+      const box = (await handle.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2, { steps: 5 });
+    };
+
+    await drag(60);
+    await expect.poll(() => page.getByTestId("left-panel-width").textContent()).toContain(`${before + 60} px`);
+    await page.mouse.up();
+    expect(await widthOf()).toBe(before + 60);
+    expect(await storedLeft()).toBe(before + 60);
+
+    await drag(1000);
+    await page.mouse.up();
+    expect(await widthOf()).toBe(480);
+    // The floor is what the tab strip needs with its longest label ("Components") open, so it never clips.
+    const activeTab = await panel.locator('[role="tab"][aria-selected="true"]').getAttribute("data-panel-tab");
+    await panel.locator('[data-panel-tab="components"]').click();
+    await drag(-1000);
+    await expect.poll(() => page.getByTestId("left-panel-width").textContent()).toMatch(/^(\d+) px · \1–480$/);
+    await page.mouse.up();
+    const floor = await widthOf();
+    expect(floor).toBeGreaterThan(200);
+    const strip = () =>
+      panel.locator('[role="tablist"]').evaluate((element) => {
+        const label = element.querySelector<HTMLElement>('[data-panel-tab="components"] .tab-label > span')!;
+        return { overflows: element.scrollWidth > element.clientWidth, clipped: label.scrollWidth > label.clientWidth };
+      });
+    await expect.poll(strip).toEqual({ overflows: false, clipped: false });
+    // A narrower window shrinks the default widths, but not below the floor either.
+    const resize = (width: number) =>
+      app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0]!.setContentSize(size, 800), width);
+    await handle.dblclick();
+    await resize(1000);
+    await expect.poll(widthOf).toBe(floor);
+    await resize(1440);
+    await panel.locator(`[data-panel-tab="${activeTab}"]`).click();
+
+    await handle.dblclick();
+    await expect.poll(widthOf).toBe(before);
+    expect(await storedLeft()).toBeNull();
+  });
+
+  it("does not scroll the layers of a shallow project sideways, and keeps row toggles in place", async () => {
+    await page.getByTestId("layers-panel").locator(".layer-row").first().waitFor();
+    const layout = await page.getByTestId("layers-panel").locator(".panel-body").evaluate((scroller) => {
+      const right = scroller.getBoundingClientRect().left + scroller.clientLeft + scroller.clientWidth;
+      const trails = [...scroller.querySelectorAll(".layer-trail")].map((trail) => Math.round(right - trail.getBoundingClientRect().right));
+      return { overflow: scroller.scrollWidth - scroller.clientWidth, trails: [...new Set(trails)] };
+    });
+    expect(layout.overflow).toBe(0);
+    expect(layout.trails).toEqual([6]);
   });
 });
 
@@ -901,11 +1057,15 @@ describe("desktop editor animation preview", () => {
     await panel.press("0");
     await expect.poll(cellWidth).toBeCloseTo(before, 0);
 
+    // The preview opens as the bottom dock's tab; full screen grows that dock over the canvas area.
+    const dock = win.getByTestId("dock-centre");
+    expect(await dock.locator('[role="tab"][aria-selected="true"]').getAttribute("data-panel-tab")).toBe("preview");
     await panel.getByTestId("preview-fullscreen").click();
     const props = (await win.getByTestId("properties-panel").boundingBox())!;
     const full = (await panel.boundingBox())!;
     expect(full.height).toBeGreaterThan(500);
     expect(full.x + full.width).toBeLessThanOrEqual(props.x);
+    expect(await dock.getAttribute("class")).toContain("is-fullscreen");
     await panel.press("Escape");
     await expect.poll(async () => (await panel.boundingBox())!.height).toBeLessThan(full.height);
     await panel.press("Escape");
@@ -1006,7 +1166,7 @@ describe("desktop editor animation preview", () => {
     await label.getByTestId("frame-label-play").click();
     const panel = win.getByTestId("preview-panel");
     await expect.poll(() => panel.getByTestId("preview-cell").count()).toBe(1);
-    await expect.poll(() => win.getByTestId("toggle-preview").getAttribute("class")).toContain("is-active");
+    await expect.poll(() => win.locator('[data-panel-tab="preview"]').getAttribute("class")).toContain("is-active");
 
     const stage = panel.getByTestId("preview-stage");
     const box = (await stage.boundingBox())!;
@@ -1024,7 +1184,13 @@ describe("desktop editor animation preview", () => {
 
     await panel.press("0");
     await expect.poll(() => panel.getByTestId("preview-zoom").textContent()).toContain("100%");
-    await win.getByTestId("toggle-preview").click();
+    await win.getByTestId("canvas").click({ position: { x: 5, y: 5 } });
+    await win.keyboard.press("p");
+    const closing = await panel.evaluate((element) => ({
+      state: element.closest(".presence")?.getAttribute("data-state"),
+      cells: element.querySelectorAll('[data-testid="preview-cell"]').length,
+    }));
+    expect(closing).toEqual({ state: "closed", cells: 1 });
     await panel.waitFor({ state: "detached" });
   });
 
@@ -1044,7 +1210,7 @@ describe("desktop editor animation preview", () => {
   it("keeps a closing side panel mounted until its exit transition ends", async () => {
     const layers = win.getByTestId("layers-panel");
     await win.keyboard.press("Control+BracketLeft");
-    await expect.poll(() => layers.evaluate((element) => element.parentElement?.getAttribute("data-state"))).toBe("closed");
+    await expect.poll(() => layers.evaluate((element) => element.closest(".presence")?.getAttribute("data-state"))).toBe("closed");
     await layers.waitFor({ state: "detached" });
     await win.keyboard.press("Control+BracketLeft");
     await layers.waitFor();
@@ -1187,7 +1353,8 @@ describe("desktop editor open files", () => {
     const box = (await label.boundingBox())!;
     await win.mouse.move(box.x + 10, box.y + box.height / 2);
     await win.mouse.down();
-    await expect.poll(() => win.getByTestId("status-bar").textContent()).toContain(`${roots.length} selected`);
+    const header = win.getByTestId("properties-panel").locator(".props-header");
+    await expect.poll(() => header.textContent()).toContain(roots.length === 1 ? `id ${roots[0]}` : `${roots.length} layers`);
     await win.mouse.move(box.x + 70, box.y + box.height / 2 + 20, { steps: 6 });
     await win.mouse.up();
     await expect
@@ -1257,4 +1424,699 @@ describe("desktop editor open files", () => {
       await other.close();
     }
   }, 60_000);
+});
+
+describe("desktop editor dockable panels", () => {
+  let dockApp: ElectronApplication;
+  let win: Page;
+
+  const tabsIn = (dock: string) => win.getByTestId(`dock-${dock}`).locator("[data-panel-tab]").evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("data-panel-tab")));
+  const activeIn = (dock: string) => win.getByTestId(`dock-${dock}`).locator('[role="tab"][aria-selected="true"]').getAttribute("data-panel-tab");
+  const storedLayout = () => win.evaluate(() => JSON.parse(localStorage.getItem("lamsa.panelLayout") ?? "null"));
+
+  /** Drags a panel's tab onto a dock's drop zone (or onto a point), checking the zones show and highlight on the way. */
+  async function dragTab({ panel, to }: { panel: string; to: string | { x: number; y: number } }) {
+    const tab = (await win.locator(`[data-panel-tab="${panel}"]`).boundingBox())!;
+    await win.mouse.move(tab.x + tab.width / 2, tab.y + tab.height / 2);
+    await win.mouse.down();
+    await win.mouse.move(tab.x + tab.width / 2 + 20, tab.y + tab.height / 2 + 20, { steps: 3 });
+    await win.getByTestId("dock-ghost").waitFor();
+    let point = typeof to === "string" ? null : to;
+    if (typeof to === "string") {
+      const zone = (await win.getByTestId(`dock-zone-${to}`).boundingBox())!;
+      point = { x: zone.x + zone.width / 2, y: zone.y + zone.height / 2 };
+    }
+    await win.mouse.move(point!.x, point!.y, { steps: 6 });
+    if (typeof to === "string") expect(await win.getByTestId(`dock-zone-${to}`).getAttribute("data-over")).toBe("");
+    await win.mouse.up();
+    await win.getByTestId("dock-ghost").waitFor({ state: "detached" });
+  }
+
+  beforeAll(async () => {
+    const dockRoot = mkdtempSync(join(tmpdir(), "lamsa-docks-"));
+    copyExample(dockRoot);
+    dockApp = await _electron.launch({
+      executablePath: ELECTRON,
+      args: [DESKTOP, "--root", dockRoot],
+      env: { ...process.env, LAMSA_HIDDEN: "1", LAMSA_MULTI_INSTANCE: "1" },
+    });
+    win = await dockApp.firstWindow();
+    await win.setViewportSize({ width: 1440, height: 900 });
+    await win.getByTestId("layers-panel").waitFor();
+  }, 60_000);
+
+  afterAll(async () => {
+    await dockApp?.close();
+  });
+
+  /** Labels that take up space: inactive ones are collapsed to zero width (they animate open and shut). */
+  const visibleTabLabels = (dock: string) =>
+    win
+      .getByTestId(`dock-${dock}`)
+      .locator(".tab-label")
+      .evaluateAll((labels) => labels.filter((label) => label.getBoundingClientRect().width > 1).map((label) => label.textContent));
+
+  it("draws the left panels as icon tabs, Agent first, with only the open tab's label and a tooltip on hover", async () => {
+    expect(await tabsIn("left")).toEqual(["agent", "layers", "files", "components"]);
+    expect(await tabsIn("right")).toEqual(["properties"]);
+    await expect.poll(() => visibleTabLabels("left")).toEqual(["Layers"]);
+    const files = win.locator('[data-panel-tab="files"]');
+    const tip = files.locator("xpath=..").getByRole("tooltip");
+    expect(await tip.isVisible()).toBe(false);
+    await files.hover();
+    await expect.poll(() => tip.isVisible()).toBe(true);
+    expect(await tip.textContent()).toBe("FilesCtrl+3");
+    await files.click();
+    expect(await activeIn("left")).toBe("files");
+    await expect.poll(() => visibleTabLabels("left")).toEqual(["Files"]);
+    await win.getByTestId("files-panel").waitFor();
+  });
+
+  it("opens a tooltip after a rest, then instantly on the next tab, hides it on press, and cools down after leaving", async () => {
+    const tipOf = (panel: string) => win.locator(`[data-panel-tab="${panel}"]`).locator("xpath=..").locator(".tip");
+    const tipState = (panel: string) =>
+      tipOf(panel).evaluate((tip) => {
+        const style = getComputedStyle(tip);
+        return { visible: style.display !== "none" && style.visibility === "visible", delay: style.transitionDelay };
+      });
+    const warm = () => win.evaluate(() => document.body.dataset.tipsWarm !== undefined);
+    const setWarm = (on: boolean) =>
+      win.evaluate((value) => {
+        if (value) document.body.dataset.tipsWarm = "";
+        else delete document.body.dataset.tipsWarm;
+      }, on);
+    // Mouse moves into this hidden test window can take longer than the delay itself, so this checks the wiring, not the clock.
+    const centreOf = async (panel: string) => {
+      const box = (await win.locator(`[data-panel-tab="${panel}"]`).boundingBox())!;
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    };
+    await win.mouse.move(700, 500);
+    await expect.poll(warm, { timeout: 5000 }).toBe(false);
+
+    const files = await centreOf("files");
+    await win.mouse.move(files.x, files.y);
+    await expect.poll(() => tipState("files")).toEqual({ visible: true, delay: "0s" });
+    expect(await warm()).toBe(true);
+    await setWarm(false);
+    expect((await tipState("files")).delay).toBe("0.5s");
+    await setWarm(true);
+
+    const components = await centreOf("components");
+    await win.mouse.move(components.x, components.y);
+    expect(await tipState("components")).toEqual({ visible: true, delay: "0s" });
+    expect((await tipState("files")).visible).toBe(false);
+
+    await win.mouse.down();
+    expect((await tipState("components")).visible).toBe(false);
+    await win.mouse.move(700, 500);
+    await win.mouse.up();
+    await expect.poll(warm, { timeout: 5000 }).toBe(false);
+  });
+
+  it("animates a tab switch made with the pointer and keeps keyboard switches instant", async () => {
+    const transitioning = (panel: string) =>
+      win.locator(`[data-panel-tab="${panel}"] .tab-label`).evaluate((label) => label.getAnimations().length > 0);
+    const before = await activeIn("left");
+    const target = before === "layers" ? "components" : "layers";
+    await win.locator(`[data-panel-tab="${target}"]`).click();
+    expect([await transitioning(target), await transitioning(before ?? "")]).toEqual([true, true]);
+    await expect.poll(() => visibleTabLabels("left")).toHaveLength(1);
+
+    await win.mouse.move(700, 500);
+    await win.locator(`[data-panel-tab="${target}"]`).focus();
+    await win.keyboard.press("ArrowRight");
+    const next = await activeIn("left");
+    expect(next).not.toBe(target);
+    expect(await transitioning(next ?? "")).toBe(false);
+    await win.locator(`[data-panel-tab="${before}"]`).click();
+  });
+
+  it("moves a tab from the left dock to the right one, and back again", async () => {
+    await dragTab({ panel: "components", to: "right" });
+    expect(await tabsIn("right")).toEqual(["properties", "components"]);
+    expect(await activeIn("right")).toBe("components");
+    expect(await tabsIn("left")).toEqual(["agent", "layers", "files"]);
+    await win.getByTestId("dock-right").getByTestId("components-panel").waitFor();
+
+    // Dropped onto the left tab strip, before Files.
+    const files = (await win.locator('[data-panel-tab="files"]').boundingBox())!;
+    await dragTab({ panel: "components", to: { x: files.x + 2, y: files.y + files.height / 2 } });
+    expect(await tabsIn("left")).toEqual(["agent", "layers", "components", "files"]);
+    expect(await tabsIn("right")).toEqual(["properties"]);
+  });
+
+  it("collapses a dock that has no tabs left, and widens the canvas area into its place", async () => {
+    // Toasts sit beside the right dock while it's open, so their right edge shows where the canvas area ends.
+    const canvasAreaRight = () => win.getByTestId("toasts").evaluate((element) => Math.round(element.getBoundingClientRect().right));
+    const before = await canvasAreaRight();
+    await dragTab({ panel: "properties", to: "left" });
+    expect(await tabsIn("left")).toEqual(["agent", "layers", "components", "files", "properties"]);
+    await win.getByTestId("dock-right").waitFor({ state: "detached" });
+    expect(await win.getByTestId("toggle-right-dock").isDisabled()).toBe(true);
+    await expect.poll(canvasAreaRight).toBeGreaterThan(before + 200);
+    await win.getByTestId("dock-left").getByTestId("properties-panel").waitFor();
+  });
+
+  it("docks a panel at the bottom, under the canvas", async () => {
+    await dragTab({ panel: "layers", to: "centre" });
+    const centre = win.getByTestId("dock-centre");
+    await centre.getByTestId("layers-panel").waitFor();
+    const box = (await centre.boundingBox())!;
+    const left = (await win.getByTestId("dock-left").boundingBox())!;
+    expect(box.x).toBeGreaterThan(left.x + left.width);
+    // Nothing sits under it: it reaches down to the window's edge, one gap above it.
+    const innerHeight = await win.evaluate(() => window.innerHeight);
+    await expect.poll(async () => innerHeight - (await centre.evaluate((element) => element.getBoundingClientRect().bottom))).toBeCloseTo(12, 0);
+    expect(await tabsIn("left")).not.toContain("layers");
+  });
+
+  it("cancels a drag with Escape or a drop outside the zones", async () => {
+    const tab = (await win.locator('[data-panel-tab="files"]').boundingBox())!;
+    await win.mouse.move(tab.x + tab.width / 2, tab.y + tab.height / 2);
+    await win.mouse.down();
+    await win.mouse.move(700, 300, { steps: 5 });
+    await win.keyboard.press("Escape");
+    await win.getByTestId("dock-ghost").waitFor({ state: "detached" });
+    await win.mouse.up();
+    await dragTab({ panel: "files", to: { x: 700, y: 200 } });
+    expect(await tabsIn("left")).toContain("files");
+  });
+
+  it("keeps the layout and each dock's size across a reload", async () => {
+    const handle = win.getByTestId("centre-panel-resize");
+    const box = (await handle.boundingBox())!;
+    const height = () => win.getByTestId("dock-centre").evaluate((element) => Math.round(element.getBoundingClientRect().height));
+    const before = await height();
+    await win.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await win.mouse.down();
+    await win.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - 50, { steps: 5 });
+    await win.mouse.up();
+    expect(await height()).toBe(before + 50);
+    const leftWidth = await win.getByTestId("dock-left").evaluate((element) => Math.round(element.getBoundingClientRect().width));
+
+    const layout = await storedLayout();
+    await win.reload();
+    await win.getByTestId("dock-centre").getByTestId("layers-panel").waitFor();
+    expect(await storedLayout()).toEqual(layout);
+    expect(await tabsIn("left")).toEqual(["agent", "components", "files", "properties"]);
+    expect(await height()).toBe(before + 50);
+    expect(await win.getByTestId("dock-left").evaluate((element) => Math.round(element.getBoundingClientRect().width))).toBe(leftWidth);
+  });
+
+  it("remembers each side dock's width on its own", async () => {
+    await dragTab({ panel: "properties", to: "right" });
+    // Let the dock finish sliding in before grabbing its edge.
+    await win.waitForTimeout(300);
+    const width = (dock: string) => win.getByTestId(`dock-${dock}`).evaluate((element) => Math.round(element.getBoundingClientRect().width));
+    const left = await width("left");
+    const right = await width("right");
+    const box = (await win.getByTestId("right-panel-resize").boundingBox())!;
+    await win.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await win.mouse.down();
+    await win.mouse.move(box.x + box.width / 2 - 40, box.y + box.height / 2, { steps: 5 });
+    expect(await win.getByTestId("right-panel-width").textContent()).toContain(`${right + 40} px`);
+    await win.mouse.up();
+    expect(await width("right")).toBe(right + 40);
+    expect(await width("left")).toBe(left);
+    expect((await storedLayout()).right.size).toBe(right + 40);
+  });
+
+  it("reaches and moves tabs from the keyboard", async () => {
+    await win.keyboard.press("Control+3");
+    await expect.poll(() => win.evaluate(() => document.activeElement?.getAttribute("data-panel-tab"))).toBe("files");
+    expect(await activeIn("left")).toBe("files");
+    await win.keyboard.press("ArrowRight");
+    expect(await activeIn("left")).toBe("agent");
+    await win.keyboard.press("ArrowLeft");
+    await win.keyboard.press("Shift+F10");
+    await win.getByTestId("panel-tab-menu").locator('[data-dock-target="right"]').click();
+    await expect.poll(() => tabsIn("right")).toEqual(["properties", "files"]);
+    await expect.poll(() => win.evaluate(() => document.activeElement?.getAttribute("data-panel-tab"))).toBe("files");
+  });
+
+  it("resets to the default layout from the project menu, the shortcuts list, and the keyboard", async () => {
+    await win.getByTestId("project-menu").click();
+    await win.getByTestId("reset-panel-layout").click();
+    expect(await tabsIn("left")).toEqual(["agent", "layers", "files", "components"]);
+    expect(await tabsIn("right")).toEqual(["properties"]);
+    await win.getByTestId("dock-centre").waitFor({ state: "detached" });
+    expect(await storedLayout()).toBeNull();
+
+    await dragTab({ panel: "layers", to: "right" });
+    await win.getByTestId("canvas").click({ position: { x: 5, y: 5 } });
+    await win.keyboard.press("Control+Alt+0");
+    expect(await tabsIn("left")).toEqual(["agent", "layers", "files", "components"]);
+
+    await win.keyboard.press("Shift+Slash");
+    await expect.poll(() => win.getByTestId("shortcuts-help").getByText("Reset panel layout").count()).toBe(1);
+    await win.keyboard.press("Escape");
+  });
+});
+
+describe("desktop editor preview dock", () => {
+  let previewApp: ElectronApplication;
+  let win: Page;
+
+  const tabsIn = (dock: string) => win.getByTestId(`dock-${dock}`).locator("[data-panel-tab]").evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("data-panel-tab")));
+  const activeIn = (dock: string) => win.getByTestId(`dock-${dock}`).locator('[role="tab"][aria-selected="true"]').getAttribute("data-panel-tab");
+  const visibleTabLabels = (dock: string) =>
+    win
+      .getByTestId(`dock-${dock}`)
+      .locator(".tab-label")
+      .evaluateAll((labels) => labels.filter((label) => label.getBoundingClientRect().width > 1).map((label) => label.textContent));
+  const focusCanvas = () => win.getByTestId("canvas").click({ position: { x: 5, y: 5 } });
+  /** Moves a tab to another dock with its Shift+F10 menu. */
+  const moveTab = async ({ panel, to }: { panel: string; to: string }) => {
+    await win.locator(`[data-panel-tab="${panel}"]`).focus();
+    await win.keyboard.press("Shift+F10");
+    await win.getByTestId("panel-tab-menu").locator(`[data-dock-target="${to}"]`).click();
+    await win.getByTestId(`dock-${to}`).locator(`[data-panel-tab="${panel}"]`).waitFor();
+  };
+
+  beforeAll(async () => {
+    const previewRoot = mkdtempSync(join(tmpdir(), "lamsa-preview-dock-"));
+    copyExample(previewRoot);
+    previewApp = await _electron.launch({
+      executablePath: ELECTRON,
+      args: [DESKTOP, "--root", previewRoot],
+      env: { ...process.env, LAMSA_HIDDEN: "1", LAMSA_MULTI_INSTANCE: "1" },
+    });
+    win = await previewApp.firstWindow();
+    await win.setViewportSize({ width: 1440, height: 900 });
+    await win.getByTestId("layers-panel").waitFor();
+  }, 60_000);
+
+  afterAll(async () => {
+    await previewApp?.close();
+  });
+
+  it("keeps the bottom dock closed until the preview opens, with Preview as its icon tab", async () => {
+    expect(await win.getByTestId("dock-centre").count()).toBe(0);
+    await focusCanvas();
+    await win.keyboard.press("p");
+    await win.getByTestId("dock-centre").waitFor();
+    expect(await tabsIn("centre")).toEqual(["preview"]);
+    await expect.poll(() => visibleTabLabels("centre")).toEqual(["Preview"]);
+    expect(await win.locator('[data-panel-tab="preview"] svg').count()).toBe(1);
+    const tab = win.locator('[data-panel-tab="preview"]');
+    await tab.hover();
+    const tip = tab.locator("xpath=..").getByRole("tooltip");
+    await expect.poll(() => tip.isVisible()).toBe(true);
+    expect(await tip.textContent()).toBe("PreviewCtrl+6");
+    // Nothing was selected, so the preview explains how to fill it.
+    await win.getByTestId("preview-empty").waitFor();
+    expect(await win.getByTestId("preview-selection").isDisabled()).toBe(true);
+    expect(await win.locator('[data-panel-tab="preview"]').getAttribute("class")).toContain("is-active");
+    await focusCanvas();
+    await win.keyboard.press("p");
+    await win.getByTestId("dock-centre").waitFor({ state: "detached" });
+  });
+
+  it("previews the selection from the empty state and toggles the bottom dock from the top bar", async () => {
+    await win.getByTestId("toggle-centre-dock").click();
+    await win.getByTestId("preview-empty").waitFor();
+    await win.getByTestId("layers-panel").getByText("Checkout · Default", { exact: true }).click();
+    await win.getByTestId("preview-selection").click();
+    await expect.poll(() => win.getByTestId("preview-cell").count()).toBe(1);
+    await win.getByTestId("toggle-centre-dock").click();
+    await win.getByTestId("dock-centre").waitFor({ state: "detached" });
+    // Ctrl+6 brings the tab back with what it was playing.
+    await focusCanvas();
+    await win.keyboard.press("Control+6");
+    await expect.poll(() => win.getByTestId("preview-cell").count()).toBe(1);
+    await win.keyboard.press("Control+'");
+    await win.getByTestId("dock-centre").waitFor({ state: "detached" });
+  });
+
+  it("hides the bottom dock from its own button, even in full screen, and keeps the button clear of the tabs", async () => {
+    await focusCanvas();
+    await win.keyboard.press("Control+6");
+    const dock = win.getByTestId("dock-centre");
+    await dock.waitFor();
+    const hide = dock.getByTestId("hide-bottom-panel");
+    const layout = await dock.evaluate((element) => {
+      const strip = element.querySelector(".tabs")!.getBoundingClientRect();
+      const tabs = Array.from(element.querySelectorAll("[data-panel-tab]")).map((tab) => tab.getBoundingClientRect().right);
+      const button = element.querySelector('[data-testid="hide-bottom-panel"]')!.getBoundingClientRect();
+      return { insideStrip: button.top >= strip.top && button.bottom <= strip.bottom, clearOfTabs: Math.max(...tabs) <= button.left, nearRight: Math.round(element.getBoundingClientRect().right - button.right) };
+    });
+    expect(layout).toEqual({ insideStrip: true, clearOfTabs: true, nearRight: 9 });
+    expect(await win.getByTestId("dock-left").getByTestId("hide-bottom-panel").count()).toBe(0);
+    expect(await win.getByTestId("dock-right").getByTestId("hide-bottom-panel").count()).toBe(0);
+    expect(await hide.getAttribute("aria-label")).toBe("Hide bottom panel");
+
+    await hide.click();
+    await dock.waitFor({ state: "detached" });
+    // Ctrl+6 brings it back with Preview still active.
+    await focusCanvas();
+    await win.keyboard.press("Control+6");
+    await dock.waitFor();
+    expect(await dock.locator('[data-panel-tab="preview"]').getAttribute("class")).toContain("is-active");
+    await hide.click();
+    await dock.waitFor({ state: "detached" });
+
+    await win.getByTestId("layers-panel").locator(".layer-row").filter({ hasText: "Checkout · Default" }).click();
+    await win.keyboard.press("p");
+    const panel = dock.getByTestId("preview-panel");
+    await expect.poll(() => panel.getByTestId("preview-cell").count()).toBe(1);
+    await panel.press("f");
+    await expect.poll(() => dock.getAttribute("class")).toContain("is-fullscreen");
+    await hide.click();
+    await dock.waitFor({ state: "detached" });
+    await focusCanvas();
+    await win.keyboard.press("Control+6");
+    await dock.waitFor();
+    expect(await dock.getAttribute("class")).not.toContain("is-fullscreen");
+    await hide.click();
+    await dock.waitFor({ state: "detached" });
+  });
+
+  it("moves Preview to the left dock, opens it there with P, and hands the dock back on close", async () => {
+    await win.keyboard.press("Control+6");
+    await win.getByTestId("dock-centre").waitFor();
+    await moveTab({ panel: "preview", to: "left" });
+    await win.getByTestId("dock-centre").waitFor({ state: "detached" });
+    expect(await activeIn("left")).toBe("preview");
+    await win.getByTestId("dock-left").getByTestId("preview-panel").waitFor();
+    await win.locator('[data-panel-tab="layers"]').click();
+
+    await win.getByTestId("layers-panel").getByText("Checkout · Default", { exact: true }).click();
+    await win.keyboard.press("p");
+    await expect.poll(() => activeIn("left")).toBe("preview");
+    await expect.poll(() => win.getByTestId("dock-left").getByTestId("preview-cell").count()).toBe(1);
+    await win.keyboard.press("p");
+    await expect.poll(() => activeIn("left")).toBe("layers");
+    expect(await win.getByTestId("dock-left").isVisible()).toBe(true);
+  });
+
+  it("puts Preview back in the bottom dock when the layout is reset", async () => {
+    await focusCanvas();
+    await win.keyboard.press("Control+Alt+0");
+    expect(await tabsIn("left")).toEqual(["agent", "layers", "files", "components"]);
+    await win.keyboard.press("p");
+    await win.getByTestId("dock-centre").getByTestId("preview-panel").waitFor();
+    await win.keyboard.press("p");
+    await win.getByTestId("dock-centre").waitFor({ state: "detached" });
+  });
+
+  it("adds Preview to its home dock when a layout saved before it existed is loaded", async () => {
+    await win.evaluate(() =>
+      localStorage.setItem(
+        "lamsa.panelLayout",
+        JSON.stringify({
+          left: { tabs: ["agent", "layers", "files", "components"], active: "layers", size: 300 },
+          right: { tabs: ["properties"], active: "properties", size: null },
+          centre: { tabs: [], active: null, size: null },
+        }),
+      ),
+    );
+    await win.reload();
+    await win.getByTestId("layers-panel").waitFor();
+    expect(await win.getByTestId("dock-centre").count()).toBe(0);
+    expect(await win.getByTestId("dock-left").evaluate((element) => Math.round(element.getBoundingClientRect().width))).toBe(300);
+    await focusCanvas();
+    await win.keyboard.press("p");
+    expect(await tabsIn("centre")).toEqual(["preview"]);
+    await win.keyboard.press("p");
+    await win.keyboard.press("Control+Alt+0");
+  });
+
+  describe("draws every dock's tab strip the same way", () => {
+    beforeAll(async () => {
+      await focusCanvas();
+      await win.keyboard.press("Control+6");
+      await win.getByTestId("dock-centre").waitFor();
+      await moveTab({ panel: "components", to: "centre" });
+      await moveTab({ panel: "files", to: "right" });
+    });
+
+    it.each(["left", "right", "centre"])("%s dock: icon tabs, only the open tab's label, tooltips, and a resize handle", async (dock) => {
+      const container = win.getByTestId(`dock-${dock}`);
+      const tabs = (await tabsIn(dock)) as string[];
+      expect(tabs.length).toBeGreaterThan(1);
+      for (const panel of tabs) {
+        await container.locator(`[data-panel-tab="${panel}"]`).click();
+        const title = await container.locator(`[data-panel-tab="${panel}"]`).getAttribute("aria-label");
+        await expect.poll(() => visibleTabLabels(dock)).toEqual([title]);
+        // Polled: the label animates open after the click.
+        const strip = () =>
+          container.locator('[role="tablist"]').evaluate((element) => {
+            const label = element.querySelector<HTMLElement>('[aria-selected="true"] .tab-label > span')!;
+            return { overflows: element.scrollWidth > element.clientWidth, clipped: label.scrollWidth > label.clientWidth };
+          });
+        await expect.poll(strip, { message: `${panel} in the ${dock} dock` }).toEqual({ overflows: false, clipped: false });
+      }
+      expect(await container.locator("[data-panel-tab] svg").count()).toBe(tabs.length);
+      const other = container.locator(`[data-panel-tab="${tabs[0]}"]`);
+      await win.mouse.move(700, 450);
+      await other.hover();
+      const tip = other.locator("xpath=..").getByRole("tooltip");
+      await expect.poll(() => tip.isVisible()).toBe(true);
+      expect(await tip.textContent()).toMatch(/Ctrl\+\d$/);
+      await win.getByTestId(`${dock}-panel-resize`).waitFor();
+    });
+  });
+});
+
+describe("desktop editor agent chat", () => {
+  const FAKE_BIN = join(repo, "tests/fixtures/fake-claude");
+  let chatRoot: string;
+  let claudeProjects: string;
+  let terminalLog: string;
+  let chatApp: ElectronApplication;
+  let win: Page;
+
+  const thread = () => win.getByTestId("agent-thread");
+  const send = async (text: string) => {
+    await win.getByTestId("agent-input").fill(text);
+    await win.getByTestId("agent-input").press("Enter");
+  };
+  const idle = () => win.getByTestId("agent-working").waitFor({ state: "detached", timeout: 15_000 });
+  /** Each test starts from the chat, even if the one before it stopped part way through the history list. */
+  const backToChat = async () => {
+    if (await win.getByTestId("agent-history-back").count()) await win.getByTestId("agent-history-back").click();
+  };
+  const sessionSelection = () => {
+    try {
+      return (JSON.parse(readFileSync(join(chatRoot, ".lamsa/session.json"), "utf8")) as { selection: string[] }).selection;
+    } catch {
+      return [];
+    }
+  };
+
+  beforeAll(async () => {
+    chatRoot = mkdtempSync(join(tmpdir(), "lamsa-chat-"));
+    copyExample(chatRoot);
+    terminalLog = join(mkdtempSync(join(tmpdir(), "lamsa-terminal-log-")), "opened.txt");
+    claudeProjects = mkdtempSync(join(tmpdir(), "lamsa-claude-projects-"));
+    chatApp = await _electron.launch({
+      executablePath: ELECTRON,
+      args: [DESKTOP, "--root", chatRoot],
+      env: {
+        ...process.env,
+        LAMSA_HIDDEN: "1",
+        LAMSA_MULTI_INSTANCE: "1",
+        // A fake claude and terminal: the chat runs offline and opens no windows.
+        PATH: `${FAKE_BIN}:${process.env.PATH}`,
+        TERMINAL: join(FAKE_BIN, "terminal"),
+        FAKE_TERMINAL_LOG: terminalLog,
+        FAKE_CLAUDE_PROJECTS: claudeProjects,
+        FAKE_CLAUDE_TERMINAL_MS: "2000",
+      },
+    });
+    win = await chatApp.firstWindow();
+    await win.locator('[data-panel-tab="agent"]').click();
+    await win.getByTestId("agent-input").waitFor();
+  }, 60_000);
+
+  afterAll(async () => {
+    await chatApp?.close();
+  });
+
+  it("sends a message, streams the reply, and links the layers it changed to the canvas", async () => {
+    await expect.poll(() => win.getByTestId("agent-title").textContent()).toBe("New chat");
+    await send("Please edit the checkout title");
+    await expect.poll(() => win.getByTestId("agent-title").textContent()).toBe("Please edit the checkout title");
+    await expect.poll(() => thread().textContent(), { timeout: 15_000 }).toContain("Done. The title now reads");
+    await idle();
+    const steps = win.getByTestId("agent-step");
+    await expect.poll(() => steps.allTextContents()).toEqual(["Editdesigns/checkout.lamsa.json", "Validatelamsa validate"]);
+    const change = win.getByTestId("agent-change-row");
+    await expect.poll(() => change.getAttribute("data-node-id")).toBe("gmrdFHB9");
+    expect(await win.getByTestId("agent-changes").textContent()).toContain("content");
+    await change.click();
+    await expect.poll(sessionSelection).toEqual(["gmrdFHB9"]);
+  });
+
+  it("starts a new chat, lists past conversations, and resumes one where it left off", async () => {
+    await win.getByTestId("agent-new-chat").click();
+    await expect.poll(() => win.getByTestId("agent-title").textContent()).toBe("New chat");
+    await send("hello there");
+    await expect.poll(() => thread().textContent(), { timeout: 15_000 }).toContain("You said: hello there");
+    await idle();
+
+    await win.getByTestId("agent-history-button").click();
+    const rows = win.getByTestId("agent-history-row");
+    await expect.poll(() => rows.count()).toBe(2);
+    expect(await rows.nth(0).textContent()).toMatch(/^hello there.*Open$/);
+    expect(await rows.nth(1).textContent()).toContain("1 layer changed");
+
+    await rows.nth(1).click();
+    await expect.poll(() => win.getByTestId("agent-title").textContent()).toBe("Please edit the checkout title");
+    // The conversation comes back from claude's own session file, with lamsa's record of what it changed.
+    await win.getByTestId("agent-changes").waitFor();
+    await send("and once more");
+    await expect.poll(() => thread().textContent(), { timeout: 15_000 }).toContain("You said: and once more");
+    await idle();
+    expect(await win.getByTestId("agent-error").count()).toBe(0);
+    expect(await win.getByTestId("agent-user-message").count()).toBe(2);
+  });
+
+  it("shows a failed turn with a way to retry", async () => {
+    await backToChat();
+    await send("please fail");
+    await win.getByTestId("agent-error").waitFor({ timeout: 15_000 });
+    expect(await win.getByTestId("agent-error").textContent()).toContain("usage limit reached");
+    await idle();
+    await win.getByTestId("agent-error").getByRole("button", { name: "Retry" }).waitFor();
+  });
+
+  it("stops a turn from the message box", async () => {
+    await backToChat();
+    await send("be slow");
+    await expect.poll(() => thread().textContent(), { timeout: 15_000 }).toContain("Working on it");
+    const errors = await win.getByTestId("agent-error").count();
+    await win.getByTestId("agent-stop").click();
+    await idle();
+    await expect.poll(() => thread().locator(".agent-note").last().textContent()).toBe("Stopped");
+    expect(await win.getByTestId("agent-error").count()).toBe(errors);
+    await win.getByTestId("agent-send").waitFor();
+  });
+
+  it("shows a refused command as blocked, and allows it for the chat on request", async () => {
+    await backToChat();
+    await send("clean the build folder");
+    await win.getByTestId("agent-blocked-step").waitFor({ timeout: 15_000 });
+    await idle();
+    expect(await win.getByTestId("agent-blocked-step").textContent()).toContain("Blocked:rm -rf build");
+    await win.getByTestId("agent-blocked-step").getByRole("button", { name: "Allow & retry" }).click();
+    await expect.poll(() => thread().textContent(), { timeout: 15_000 }).toContain("Cleaned the build folder.");
+    await idle();
+  });
+
+  it("continues the chat in the user's terminal and picks it up when that closes", async () => {
+    await backToChat();
+    await win.getByTestId("agent-title").click();
+    await win.keyboard.press("Control+j");
+    await win.getByTestId("agent-continued").waitFor({ timeout: 10_000 });
+    await expect.poll(() => (existsSync(terminalLog) ? readFileSync(terminalLog, "utf8") : "")).toMatch(/claude'? '--resume' '[0-9a-f-]{36}'/);
+    expect(readFileSync(terminalLog, "utf8").split("\n")[0]).toBe(chatRoot);
+    await win.getByTestId("agent-continued").waitFor({ state: "detached", timeout: 15_000 });
+    await expect.poll(() => thread().textContent()).toContain("Picked up in the terminal.");
+    await win.getByTestId("agent-input").waitFor();
+  });
+
+  it("turns pasted layers and layer ids into pills, sends them as layer links, and links them back to the canvas", async () => {
+    await backToChat();
+    await win.getByTestId("agent-new-chat").click();
+    const input = win.getByTestId("agent-input");
+    const pills = input.locator('[data-testid="agent-input-pill"]');
+    const paste = async (text?: string) => {
+      if (text !== undefined) await win.evaluate((value) => navigator.clipboard.writeText(value), text);
+      await input.click();
+      await win.keyboard.press("Control+v");
+    };
+
+    // Copy a layer on the canvas; the selection itself shows nowhere in the message box.
+    await win.locator('[data-panel-tab="layers"]').click();
+    await win.getByTestId("layers-panel").getByText("Pay button", { exact: true }).click();
+    await expect.poll(sessionSelection).toEqual(["QkpksTeC"]);
+    await win.keyboard.press("Control+c");
+    await expect.poll(() => win.evaluate(() => navigator.clipboard.readText())).toContain('"id": "QkpksTeC"');
+    await win.locator('[data-panel-tab="agent"]').click();
+    await expect.poll(() => input.getAttribute("data-placeholder")).toBe("Ask about the selection…");
+    expect(await win.locator(".agent-composer .agent-chip, [data-testid='agent-context-chip']").count()).toBe(0);
+    expect(await pills.count()).toBe(0);
+
+    await paste();
+    await expect.poll(() => pills.count()).toBe(1);
+    expect(await pills.textContent()).toBe("Pay button");
+    expect(await pills.getAttribute("title")).toBe("QkpksTeC · designs/checkout.lamsa.json");
+    expect(await input.textContent()).not.toContain("{");
+
+    // Backspace takes the pill out whole (the first one removes the space after it).
+    await win.keyboard.press("Backspace");
+    await win.keyboard.press("Backspace");
+    await expect.poll(() => pills.count()).toBe(0);
+    await expect.poll(() => input.textContent()).toBe("");
+
+    await paste("QkpksTeC please, not abcd1234");
+    await expect.poll(() => pills.count()).toBe(1);
+    expect(await input.textContent()).toBe("Pay button please, not abcd1234");
+
+    await input.press("Enter");
+    await expect.poll(() => thread().textContent(), { timeout: 15_000 }).toContain("You said: Pay button please, not abcd1234");
+    await idle();
+    expect(await input.textContent()).toBe("");
+    // The agent got the layer as a link with its id.
+    const transcripts = readdirSync(claudeProjects, { recursive: true, encoding: "utf8" }).filter((name) => name.endsWith(".jsonl"));
+    const prompts = transcripts.map((name) => readFileSync(join(claudeProjects, name), "utf8")).join("\n");
+    expect(prompts).toContain(JSON.stringify("[Pay button](lamsa:QkpksTeC) please, not abcd1234"));
+    await expect.poll(() => win.getByTestId("agent-title").textContent()).toBe("Pay button please, not abcd1234");
+
+    // In the thread, the user's message and the reply both show the layer as a pill that selects it.
+    const threadPills = thread().getByTestId("agent-layer-pill");
+    await expect.poll(() => threadPills.count()).toBe(2);
+    const userPill = win.getByTestId("agent-user-message").last().getByTestId("agent-layer-pill");
+    expect(await userPill.textContent()).toBe("Pay button");
+    await win.getByTestId("canvas").click({ position: { x: 5, y: 5 } });
+    await expect.poll(sessionSelection).toEqual([]);
+    await userPill.click();
+    await expect.poll(sessionSelection).toEqual(["QkpksTeC"]);
+  });
+
+  it("explains when claude isn't installed, and recovers when it is", async () => {
+    const configFile = join(chatRoot, "lamsa.config.json");
+    const original = readFileSync(configFile, "utf8");
+    const config = JSON.parse(original);
+    writeFileSync(configFile, JSON.stringify({ ...config, agent: { command: "/nowhere/claude", args: [] } }, null, 2));
+    await expect.poll(() => win.getByTestId("agent-notice").textContent(), { timeout: 10_000 }).toContain("isn't installed");
+    writeFileSync(configFile, original);
+    await win.getByTestId("agent-input").waitFor({ timeout: 10_000 });
+  });
+
+  it("keeps the chat in a readable centred column when docked in the wide bottom panel", async () => {
+    await win.getByTestId("agent-new-chat").click();
+    await win.locator(".agent-suggestion").first().waitFor();
+    await win.locator('[data-panel-tab="agent"]').focus();
+    await win.keyboard.press("Shift+F10");
+    await win.getByTestId("panel-tab-menu").locator('[data-dock-target="centre"]').click();
+    const dock = win.getByTestId("dock-centre");
+    await dock.locator('[data-panel-tab="agent"]').waitFor();
+    const column = () =>
+      dock.evaluate((element) => {
+        const box = (selector: string) => element.querySelector(selector)!.getBoundingClientRect();
+        const panel = box(".agent");
+        return [".agent-composer-box", ".agent-suggestions"].map((selector) => {
+          const rect = box(selector);
+          return { panel: Math.round(panel.width), width: Math.round(rect.width), offCentre: Math.round(Math.abs(rect.left + rect.width / 2 - (panel.left + panel.width / 2))) };
+        });
+      });
+    await expect.poll(async () => (await column())[0]!.panel).toBeGreaterThan(760);
+    for (const { width, offCentre } of await column()) {
+      expect(width).toBeLessThanOrEqual(684);
+      expect(width).toBeGreaterThan(600);
+      expect(offCentre).toBeLessThanOrEqual(2);
+    }
+    await win.locator('[data-panel-tab="agent"]').focus();
+    await win.keyboard.press("Shift+F10");
+    await win.getByTestId("panel-tab-menu").locator('[data-dock-target="left"]').click();
+    await win.getByTestId("dock-left").locator('[data-panel-tab="agent"]').waitFor();
+    const narrow = await win.getByTestId("dock-left").evaluate((element) => {
+      const panel = element.querySelector(".agent")!.getBoundingClientRect();
+      const box = element.querySelector(".agent-composer-box")!.getBoundingClientRect();
+      return Math.round(panel.width - box.width);
+    });
+    expect(narrow).toBeLessThanOrEqual(24);
+  });
 });

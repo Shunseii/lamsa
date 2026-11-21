@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r \".tool_input.file_path // .tool_response.filePath\"); case \"$f\" in *.ts|*.tsx|*.css|*.js) cd \"${CLAUDE_PROJECT_DIR:-.}\" && out=$(node_modules/.bin/biome lint --diagnostic-level=error --no-errors-on-unmatched \"$f\" 2>&1) || { printf \"%s\\n\" \"$out\" >&2; exit 2; } ;; esac",
+            "timeout": 30,
+            "statusMessage": "Biome lint"
+          }
+        ]
+      }
+    ]
+  }
+}

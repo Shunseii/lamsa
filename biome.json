@@ -1,0 +1,62 @@
+{
+	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true
+	},
+	"files": {
+		"includes": [
+			"apps/**/src/**",
+			"packages/**/src/**",
+			"tests/**",
+			"*.ts",
+			"!**/dist",
+			"!**/out",
+			"!**/*.lamsa.json"
+		]
+	},
+	"formatter": {
+		"enabled": false
+	},
+	"assist": {
+		"enabled": false
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"style": {
+				"noNonNullAssertion": "off",
+				"useTemplate": "off",
+				"noDescendingSpecificity": "off"
+			},
+			"a11y": {
+				"useButtonType": "off",
+				"noAutofocus": "off",
+				"noSvgWithoutTitle": "off",
+				"noStaticElementInteractions": "warn",
+				"useKeyWithClickEvents": "warn",
+				"useSemanticElements": "warn",
+				"useAriaPropsSupportedByRole": "warn"
+			},
+			"correctness": {
+				"useExhaustiveDependencies": "warn"
+			},
+			"complexity": {
+				"noImportantStyles": "off"
+			},
+			"suspicious": {
+				"noArrayIndexKey": "warn"
+			},
+			"security": {
+				"noDangerouslySetInnerHtml": "warn"
+			}
+		}
+	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
+		}
+	}
+}

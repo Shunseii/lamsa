@@ -2,7 +2,8 @@ import type { DesignNode } from "@lamsa/schema";
 import type { NodeChange } from "../../../shared/api";
 import { deleteSubtrees, detachInstance, duplicate, fromNested, groupIntoFrame, insertNodes, toNested, topmost } from "./edits";
 import { hiddenByDefault, isLocked, rootOf } from "./model";
-import { firstOpenFile, useEditor } from "./store";
+import { PANEL_IDS } from "./layout";
+import { firstOpenFile, isPreviewShown, useEditor } from "./store";
 import { fitTo, measuredSize, zoomBy, zoomTo } from "./viewport";
 
 export type CommandName =
@@ -26,16 +27,24 @@ export type CommandName =
   | "detach"
   | "toggle-hidden"
   | "toggle-locked"
-  | "preview-animations";
+  | "preview-animations"
+  | "toggle-preview"
+  | "reset-panel-layout";
 
 export async function runCommand(name: CommandName): Promise<void> {
   const state = useEditor.getState();
   const { model, selection, commit, select } = state;
   switch (name) {
-    case "preview-animations": {
-      if (selection.length) state.openPreview(topmost(model, selection));
+    case "reset-panel-layout":
+      state.resetLayout();
       return;
-    }
+    case "preview-animations":
+      state.openPreview(topmost(model, selection));
+      return;
+    case "toggle-preview":
+      if (isPreviewShown(state)) state.closePreview();
+      else state.openPreview(topmost(model, selection));
+      return;
     case "copy":
     case "cut": {
       const ids = topmost(model, selection);
@@ -188,7 +197,7 @@ async function nudge(dx: number, dy: number): Promise<void> {
 export function installShortcuts(): () => void {
   const onKey = (e: KeyboardEvent) => {
     const target = e.target as HTMLElement | null;
-    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable || target.closest(".xterm"))) return;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
     const state = useEditor.getState();
     if (state.screen !== "editor") return;
     const mod = e.metaKey || e.ctrlKey;
@@ -218,12 +227,25 @@ export function installShortcuts(): () => void {
       }
       if (key === "[") {
         e.preventDefault();
-        state.togglePanel("layers");
+        state.togglePanel("left");
         return;
       }
       if (key === "]") {
         e.preventDefault();
-        state.togglePanel("properties");
+        state.togglePanel("right");
+        return;
+      }
+      if (e.code === "Quote" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        state.togglePanel("centre");
+        return;
+      }
+      if (e.altKey && e.code === "Digit0") return run("reset-panel-layout");
+      const panel = /^Digit[1-9]$/.test(e.code) && !e.altKey && !e.shiftKey ? PANEL_IDS[Number(e.code.slice(5)) - 1] : undefined;
+      if (panel) {
+        e.preventDefault();
+        state.showPanel(panel);
+        requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-panel-tab="${panel}"]`)?.focus());
         return;
       }
       if (key === "o" && !e.shiftKey) {
@@ -233,7 +255,7 @@ export function installShortcuts(): () => void {
       }
       if (key === "j") {
         e.preventDefault();
-        state.togglePanel("terminal");
+        void import("./agent").then((m) => m.useAgent.getState().openTerminal());
         return;
       }
       return;
@@ -275,7 +297,7 @@ export function installShortcuts(): () => void {
       state.setTool(tools[key]!);
       return;
     }
-    if (key === "p" && !e.shiftKey && !e.altKey) return run("preview-animations");
+    if (key === "p" && !e.shiftKey && !e.altKey) return run("toggle-preview");
     if (key === "i" && !e.shiftKey) {
       e.preventDefault();
       void import("../panels/Toolbar").then((m) => m.insertImage());

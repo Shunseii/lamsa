@@ -36,7 +36,11 @@ export function Welcome() {
     void api().welcome().then(setState);
   }, []);
 
-  const open = async (root: string) => loadSnapshot(await api().openProject(root));
+  const open = async (root: string) => {
+    // Null when the project is already open in another window, which comes forward instead.
+    const snapshot = await api().openProject(root);
+    if (snapshot) loadSnapshot(snapshot);
+  };
 
   const choose = async () => {
     const picked = await api().chooseFolder();

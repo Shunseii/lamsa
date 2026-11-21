@@ -7,7 +7,10 @@ function listen<T>(channel: string, listener: (value: T) => void): () => void {
   return () => ipcRenderer.removeListener(channel, handler);
 }
 
+const ASSET_HOST_ARG = "--lamsa-asset-host=";
+
 const api: LamsaApi = {
+  assetHost: process.argv.find((arg) => arg.startsWith(ASSET_HOST_ARG))?.slice(ASSET_HOST_ARG.length) ?? "local",
   welcome: () => ipcRenderer.invoke("welcome"),
   forgetRecent: (root: string) => ipcRenderer.invoke("forget-recent", root),
   chooseFolder: () => ipcRenderer.invoke("choose-folder"),
@@ -27,14 +30,17 @@ const api: LamsaApi = {
   render: (ids, mode) => ipcRenderer.invoke("render", ids, mode),
   importImage: () => ipcRenderer.invoke("import-image"),
   revealPath: (path) => ipcRenderer.invoke("reveal-path", path),
-  terminalStart: (cols, rows) => ipcRenderer.invoke("terminal-start", cols, rows),
-  terminalWrite: (data) => ipcRenderer.send("terminal-write", data),
-  terminalResize: (cols, rows) => ipcRenderer.send("terminal-resize", cols, rows),
-  terminalExternal: () => ipcRenderer.invoke("terminal-external"),
+  agentStatus: () => ipcRenderer.invoke("agent-status"),
+  agentSend: (request) => ipcRenderer.invoke("agent-send", request),
+  agentStop: () => ipcRenderer.invoke("agent-stop"),
+  agentSessions: () => ipcRenderer.invoke("agent-sessions"),
+  agentTranscript: (sessionId) => ipcRenderer.invoke("agent-transcript", sessionId),
+  agentTerminal: (request) => ipcRenderer.invoke("agent-terminal", request),
+  agentSignIn: () => ipcRenderer.invoke("agent-sign-in"),
   onExternalChange: (listener) => listen("external-change", listener),
   onOpenRequest: (listener) => listen("open-request", listener),
-  onTerminalData: (listener) => listen("terminal-data", listener),
-  onTerminalExit: (listener) => listen("terminal-exit", listener),
+  onAgentEvents: (listener) => listen("agent-events", listener),
+  onAgentTerminal: (listener) => listen("agent-terminal", listener),
   onProjectReloaded: (listener) => listen("project-reloaded", listener),
 };
 

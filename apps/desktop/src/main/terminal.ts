@@ -1,7 +1,7 @@
-import { spawn as spawnProcess } from "node:child_process";
-import { existsSync } from "node:fs";
-import { delimiter, isAbsolute, join } from "node:path";
-import { spawn, type IPty } from "node-pty";
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, delimiter, isAbsolute, join } from "node:path";
 
 export function findCommand(command: string): string | undefined {
   if (isAbsolute(command)) return existsSync(command) ? command : undefined;
@@ -12,79 +12,96 @@ export function findCommand(command: string): string | undefined {
   return undefined;
 }
 
-export class TerminalSession {
-  private pty?: IPty;
+type TerminalArgs = (cwd: string, run: string[]) => string[];
 
-  constructor(
-    private readonly events: { data: (data: string) => void; exit: (code: number) => void },
-  ) {}
-
-  start({
-    cwd,
-    command,
-    args,
-    cols,
-    rows,
-  }: {
-    cwd: string;
-    command: string;
-    args: string[];
-    cols: number;
-    rows: number;
-  }): { ok: boolean; error?: string } {
-    this.stop();
-    const resolved = findCommand(command);
-    if (!resolved) {
-      return { ok: false, error: `agent command not found: ${command}` };
-    }
-    this.pty = spawn(resolved, args, {
-      name: "xterm-256color",
-      cols,
-      rows,
-      cwd,
-      env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" } as Record<string, string>,
-    });
-    this.pty.onData((data) => this.events.data(data));
-    this.pty.onExit(({ exitCode }) => {
-      this.pty = undefined;
-      this.events.exit(exitCode);
-    });
-    return { ok: true };
-  }
-
-  write(data: string) {
-    this.pty?.write(data);
-  }
-
-  resize(cols: number, rows: number) {
-    if (cols > 0 && rows > 0) this.pty?.resize(cols, rows);
-  }
-
-  stop() {
-    this.pty?.kill();
-    this.pty = undefined;
-  }
-}
-
-const EXTERNAL_TERMINALS: { command: string; args: (cwd: string, run: string) => string[] }[] = [
-  { command: "x-terminal-emulator", args: (cwd, run) => ["--working-directory", cwd, "-e", run] },
-  { command: "gnome-terminal", args: (cwd, run) => ["--working-directory", cwd, "--", run] },
-  { command: "cosmic-term", args: (cwd, run) => ["--working-directory", cwd, "-e", run] },
-  { command: "kitty", args: (cwd, run) => ["--directory", cwd, run] },
-  { command: "wezterm", args: (cwd, run) => ["start", "--cwd", cwd, run] },
-  { command: "alacritty", args: (cwd, run) => ["--working-directory", cwd, "-e", run] },
-  { command: "konsole", args: (cwd, run) => ["--workdir", cwd, "-e", run] },
+const EXTERNAL_TERMINALS: { command: string; args: TerminalArgs }[] = [
+  { command: "x-terminal-emulator", args: (cwd, run) => ["--working-directory", cwd, "-e", ...run] },
+  { command: "gnome-terminal", args: (cwd, run) => ["--working-directory", cwd, "--", ...run] },
+  { command: "cosmic-term", args: (cwd, run) => ["--working-directory", cwd, "-e", ...run] },
+  { command: "kitty", args: (cwd, run) => ["--directory", cwd, ...run] },
+  { command: "wezterm", args: (cwd, run) => ["start", "--cwd", cwd, "--", ...run] },
+  { command: "alacritty", args: (cwd, run) => ["--working-directory", cwd, "-e", ...run] },
+  { command: "konsole", args: (cwd, run) => ["--workdir", cwd, "-e", ...run] },
+  { command: "foot", args: (cwd, run) => ["--working-directory", cwd, ...run] },
+  { command: "ghostty", args: (cwd, run) => [`--working-directory=${cwd}`, "-e", ...run] },
 ];
 
-export function openExternalTerminal({ cwd, command }: { cwd: string; command: string }): { ok: boolean; error?: string } {
-  if (process.platform === "darwin") {
-    spawnProcess("open", ["-a", "Terminal", cwd], { detached: true, stdio: "ignore" }).unref();
-    return { ok: true };
+const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+
+/** How often lamsa checks whether the command it opened in a terminal is still running. */
+const WATCH_MS = 1000;
+/** Some terminals take a while to start; if the command never starts, the terminal is assumed closed. */
+const START_TIMEOUT_MS = 30_000;
+
+/** The user's terminal: $TERMINAL first, then the first known one on PATH. */
+function pickTerminal(): { command: string; args: TerminalArgs } | undefined {
+  const preferred = process.env.TERMINAL?.trim();
+  if (preferred && findCommand(preferred)) {
+    const known = EXTERNAL_TERMINALS.find((terminal) => terminal.command === basename(preferred));
+    return { command: preferred, args: known?.args ?? ((_cwd, run) => ["-e", ...run]) };
   }
-  for (const terminal of EXTERNAL_TERMINALS) {
-    if (!findCommand(terminal.command)) continue;
-    spawnProcess(terminal.command, terminal.args(cwd, command), { cwd, detached: true, stdio: "ignore" }).unref();
-    return { ok: true };
+  // Hidden runs (tests) only ever use an explicit $TERMINAL, so they never open a window on the desktop.
+  if (process.env.LAMSA_HIDDEN) return undefined;
+  return EXTERNAL_TERMINALS.find((terminal) => findCommand(terminal.command));
+}
+
+/**
+ * Opens the user's own terminal in `cwd` running `command`. The command records its process id first, so
+ * `onExit` fires when it ends, even for terminals that hand the window to a server process and exit at once.
+ */
+export function openExternalTerminal({
+  cwd,
+  command,
+  args = [],
+  onExit,
+}: {
+  cwd: string;
+  command: string;
+  args?: string[];
+  onExit?: () => void;
+}): { ok: boolean; error?: string } {
+  const folder = mkdtempSync(join(tmpdir(), "lamsa-terminal-"));
+  const pidFile = join(folder, "pid");
+  const script = `printf %s "$$" > ${quote(pidFile)}; exec ${[command, ...args].map(quote).join(" ")}`;
+  const run = ["sh", "-c", script];
+
+  if (process.platform === "darwin" && !process.env.LAMSA_HIDDEN) {
+    const shellLine = `cd ${quote(cwd)} && sh -c ${quote(script)}`;
+    const appleScript = `tell application "Terminal"\nactivate\ndo script ${JSON.stringify(shellLine)}\nend tell`;
+    spawn("osascript", ["-e", appleScript], { detached: true, stdio: "ignore" }).unref();
+  } else {
+    const terminal = pickTerminal();
+    if (!terminal) {
+      rmSync(folder, { recursive: true, force: true });
+      return { ok: false, error: "no terminal emulator found; set $TERMINAL to yours" };
+    }
+    spawn(terminal.command, terminal.args(cwd, run), { cwd, detached: true, stdio: "ignore" }).unref();
   }
-  return { ok: false, error: "no terminal emulator found" };
+
+  const startedAt = Date.now();
+  let pid: number | undefined;
+  const timer = setInterval(() => {
+    if (pid === undefined) {
+      try {
+        pid = Number(readFileSync(pidFile, "utf8")) || undefined;
+      } catch {
+        // Not started yet.
+      }
+      if (pid === undefined && Date.now() - startedAt < START_TIMEOUT_MS) return;
+    }
+    if (pid !== undefined && isAlive(pid)) return;
+    clearInterval(timer);
+    rmSync(folder, { recursive: true, force: true });
+    onExit?.();
+  }, WATCH_MS);
+  return { ok: true };
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
