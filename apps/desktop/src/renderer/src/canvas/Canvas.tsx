@@ -5,12 +5,13 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 import { insertNodes, newId, reparentMany, setStyle } from "../lib/edits";
 import { ancestorsOf, baseId, childrenOf, fileRegions, isComponent, isLocked, nodeTitle, rootOf, type Model } from "../lib/model";
 import { shortcut } from "../lib/keys";
-import { firstOpenFile, useEditor } from "../lib/store";
+import { firstOpenFile, useEditor, type Viewport } from "../lib/store";
 import { AddFileMenu } from "../panels/AddFileMenu";
 import { AgentCursor } from "./AgentCursor";
 import { CommentLayer } from "./CommentLayer";
 import { startCommentAt, useComments } from "../lib/comments";
 import { findElement, FrameView, shadowRoots } from "./FrameView";
+import { BITMAP_ZOOM, PREPARE_ZOOM, prepareBitmaps, useFrameBitmaps } from "./frameBitmaps";
 import { cn } from "../lib/cn";
 
 interface Rect {
@@ -63,6 +64,41 @@ function roomAbove(boxes: FrameBox[]): Map<string, number> {
   return room;
 }
 
+const GRID_SPACING = 24;
+
+/**
+ * The dot grid. It moves by a transform (the remainder of the pan within one cell) rather than by background-position,
+ * so panning never repaints anything: a repaint anywhere makes the browser re-layer the whole canvas.
+ */
+function CanvasGrid({ viewport }: { viewport: { x: number; y: number; zoom: number } }) {
+  const cell = GRID_SPACING * viewport.zoom;
+  const shift = (value: number) => (((value % cell) + cell) % cell) - cell;
+  return (
+    <div
+      className="canvas-grid"
+      style={{ inset: -cell, backgroundSize: `${cell}px ${cell}px`, transform: `translate(${shift(viewport.x) + cell}px, ${shift(viewport.y) + cell}px)` }}
+    />
+  );
+}
+
+/** How far past the canvas edge a frame still counts as on screen, so a short pan doesn't uncover blank space. */
+const OFFSCREEN_MARGIN = 0.5;
+const NO_OFFSET = { x: 0, y: 0 };
+
+/** Frames entirely outside the canvas (with a margin of half its size), which can skip painting. */
+function offscreenFrames({ boxes, viewport, canvas }: { boxes: FrameBox[]; viewport: Viewport; canvas: HTMLElement | null }): Set<string> {
+  const outside = new Set<string>();
+  if (!canvas?.clientWidth) return outside;
+  const marginX = canvas.clientWidth * OFFSCREEN_MARGIN;
+  const marginY = canvas.clientHeight * OFFSCREEN_MARGIN;
+  const left = (-viewport.x - marginX) / viewport.zoom;
+  const top = (-viewport.y - marginY) / viewport.zoom;
+  const right = (canvas.clientWidth + marginX - viewport.x) / viewport.zoom;
+  const bottom = (canvas.clientHeight + marginY - viewport.y) / viewport.zoom;
+  for (const box of boxes) if (box.right < left || box.left > right || box.bottom < top || box.top > bottom) outside.add(box.id);
+  return outside;
+}
+
 function showsPlay(node: DesignNode, zoom: number): boolean {
   const width = parseFloat(String(node.style?.width ?? ""));
   return Number.isFinite(width) ? width * zoom >= PLAY_MIN_WIDTH : zoom >= 0.5;
@@ -77,6 +113,10 @@ interface Guide {
 function hitTest(clientX: number, clientY: number): string | null {
   for (const element of document.elementsFromPoint(clientX, clientY)) {
     if (element.classList.contains("frame-label")) return (element as HTMLElement).dataset.labelFor ?? null;
+    if (element.classList.contains("frame-bitmap")) {
+      const root = shadowRoots.get((element as HTMLElement).dataset.bitmapFor ?? "");
+      if (root) return layerAt({ root, clientX, clientY });
+    }
     if (element.classList.contains("frame-host") && element.shadowRoot) {
       let inner: Element | null = element.shadowRoot.elementFromPoint(clientX, clientY);
       while (inner && !inner.getAttribute("data-node-id")) inner = inner.parentElement;
@@ -85,6 +125,19 @@ function hitTest(clientX: number, clientY: number): string | null {
     if (element.classList.contains("panel") || element.classList.contains("bar")) return null;
   }
   return null;
+}
+
+/**
+ * The layer under a point in a frame shown as a bitmap. Its hidden live DOM can't be hit-tested, but it is still laid
+ * out: the last layer in document order whose box holds the point is the deepest, topmost one.
+ */
+function layerAt({ root, clientX, clientY }: { root: ShadowRoot; clientX: number; clientY: number }): string | null {
+  let hit: string | null = null;
+  for (const element of Array.from(root.querySelectorAll<HTMLElement>("[data-node-id]"))) {
+    const box = element.getBoundingClientRect();
+    if (clientX >= box.left && clientX <= box.right && clientY >= box.top && clientY <= box.bottom) hit = element.dataset.nodeId ?? hit;
+  }
+  return hit;
 }
 
 function numberOr(value: unknown, fallback: number): number {
@@ -148,16 +201,23 @@ export const Canvas = memo(function Canvas() {
   const regions = fileRegions(model, snapshot?.root, (id) => (shadowRoots.get(id)?.host as HTMLElement | undefined)?.offsetWidth);
   const dxOf = (id: string) => regions.get(model.fileOf.get(id) ?? "")?.dx ?? 0;
   const dxOfFile = (file: string) => regions.get(file)?.dx ?? 0;
-  const labelRoom = roomAbove(
-    model.roots.flatMap((id) => {
-      const host = shadowRoots.get(id)?.host as HTMLElement | undefined;
-      const node = model.nodes[id];
-      if (!host || !node) return [];
-      const left = (node.x ?? 0) + dxOf(id);
-      const top = node.y ?? 0;
-      return [{ id, left, top, right: left + host.offsetWidth, bottom: top + host.offsetHeight }];
-    }),
-  );
+  const frameBoxes = model.roots.flatMap((id) => {
+    const host = shadowRoots.get(id)?.host as HTMLElement | undefined;
+    const node = model.nodes[id];
+    if (!host || !node) return [];
+    const left = (node.x ?? 0) + dxOf(id);
+    const top = node.y ?? 0;
+    return [{ id, left, top, right: left + host.offsetWidth, bottom: top + host.offsetHeight }];
+  });
+  const labelRoom = roomAbove(frameBoxes);
+  const { bitmaps, drawingBitmaps } = useFrameBitmaps(useShallow((s) => ({ bitmaps: s.bitmaps, drawingBitmaps: s.drawing })));
+  const showsBitmaps = viewport.zoom < BITMAP_ZOOM;
+  const preparesBitmaps = viewport.zoom < PREPARE_ZOOM;
+  useEffect(() => {
+    prepareBitmaps(preparesBitmaps);
+    return () => prepareBitmaps(false);
+  }, [preparesBitmaps]);
+  const offscreen = offscreenFrames({ boxes: frameBoxes, viewport, canvas: container.current });
 
   const toScreen = useCallback(
     (rect: DOMRect): Rect => {
@@ -220,21 +280,33 @@ export const Canvas = memo(function Canvas() {
   useEffect(() => {
     const element = container.current;
     if (!element) return;
+    // Wheel events can come faster than frames; they add up here and the view moves once per frame.
+    let queued: Viewport | null = null;
+    let frame = 0;
+    const apply = () => {
+      frame = 0;
+      if (queued) store().setViewport(queued);
+      queued = null;
+    };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const vp = store().viewport;
+      const vp = queued ?? store().viewport;
       if (e.ctrlKey || e.metaKey) {
         const box = element.getBoundingClientRect();
         const px = e.clientX - box.left;
         const py = e.clientY - box.top;
         const zoom = Math.min(8, Math.max(0.05, vp.zoom * zoomFactor(e)));
-        store().setViewport({ zoom, x: px - ((px - vp.x) * zoom) / vp.zoom, y: py - ((py - vp.y) * zoom) / vp.zoom });
+        queued = { zoom, x: px - ((px - vp.x) * zoom) / vp.zoom, y: py - ((py - vp.y) * zoom) / vp.zoom };
       } else {
-        store().setViewport({ ...vp, x: vp.x - e.deltaX, y: vp.y - e.deltaY });
+        queued = { ...vp, x: vp.x - e.deltaX, y: vp.y - e.deltaY };
       }
+      frame ||= requestAnimationFrame(apply);
     };
     element.addEventListener("wheel", onWheel, { passive: false });
-    return () => element.removeEventListener("wheel", onWheel);
+    return () => {
+      element.removeEventListener("wheel", onWheel);
+      cancelAnimationFrame(frame);
+    };
   }, [store]);
 
   const deepestFrameAt = (displayId: string | null): string | undefined => {
@@ -783,8 +855,11 @@ export const Canvas = memo(function Canvas() {
 
   const frameOffset = (id: string) => {
     if (drag?.kind === "move-roots" && drag.ids.includes(id)) return drag.delta;
-    return { x: 0, y: 0 };
+    return NO_OFFSET;
   };
+
+  /** The top-level frame under the pointer, whose label shows in full. */
+  const hoverRoot = hover && model.nodes[baseId(hover)] ? rootOf(model, baseId(hover)) : null;
 
   const overlay: React.ReactNode[] = [];
   /** While frames are dragged their DOM already moves, so draw from where the drag started. */
@@ -893,9 +968,41 @@ export const Canvas = memo(function Canvas() {
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
       data-testid="canvas"
+      data-drawing-bitmaps={drawingBitmaps || undefined}
     >
-      <div className="canvas-grid" style={{ backgroundPosition: `${viewport.x}px ${viewport.y}px`, backgroundSize: `${24 * viewport.zoom}px ${24 * viewport.zoom}px` }} />
+      <CanvasGrid viewport={viewport} />
       <div className="world" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})` }}>
+        {model.roots.map((id) => {
+          const node = model.nodes[id]!;
+          const offset = frameOffset(id);
+          const editing = !!editingText && rootOf(model, baseId(editingText)) === id;
+          const bitmap = showsBitmaps && !editing ? bitmaps[id] : undefined;
+          return (
+            <div
+              key={id}
+              className={cn("frame-slot", { "shows-bitmap": !!bitmap, "is-offscreen": offscreen.has(id) && !editing && offset === NO_OFFSET })}
+              style={{ left: (node.x ?? 0) + dxOf(id) + offset.x, top: (node.y ?? 0) + offset.y }}
+            >
+              {bitmap && <img className="frame-bitmap" src={bitmap.url} alt="" draggable={false} data-bitmap-for={id} style={{ width: bitmap.width, height: bitmap.height }} />}
+              <FrameView
+                id={id}
+                nodes={model.nodes}
+                childIds={model.children}
+                tokens={tokens}
+                icons={icons}
+                canvasMode={canvasMode}
+                componentProps={previewProps[id]}
+                fileCss={model.fileCss}
+                version={renderVersion}
+                frozen={editing}
+              />
+            </div>
+          );
+        })}
+      </div>
+      {/* Labels sit in screen space, outside the scaled world: a pan only moves this layer and a zoom only moves the
+          labels, so the frames themselves are never repainted while the view moves. */}
+      <div className="canvas-labels" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px)` }}>
         {[...regions.values()].map((region) => {
           const screenRoom = Number.isFinite(region.room) ? region.room * viewport.zoom - FILE_LABEL_GAP : undefined;
           return (
@@ -907,7 +1014,7 @@ export const Canvas = memo(function Canvas() {
               })}
               data-file={region.file}
               title={`${region.file} · click to select its frames, drag to move them`}
-              style={{ left: region.left, top: region.top - 40 / viewport.zoom - 24, transform: `scale(${1 / viewport.zoom})`, maxWidth: screenRoom }}
+              style={{ left: region.left * viewport.zoom, top: (region.top - 24) * viewport.zoom - 40, maxWidth: screenRoom }}
             >
               <FileJson size={13} className="file-label-icon" aria-hidden />
               <span className="file-label-name">{region.file.split("/").pop()}</span>
@@ -916,21 +1023,24 @@ export const Canvas = memo(function Canvas() {
         })}
         {model.roots.map((id) => {
           const node = model.nodes[id]!;
+          if (node.type === "text") return null;
           const offset = frameOffset(id);
           const declaredWidth = parseFloat(String(node.style?.width ?? ""));
           const width = (shadowRoots.get(id)?.host as HTMLElement | undefined)?.offsetWidth || (Number.isFinite(declaredWidth) ? declaredWidth : undefined);
           const screenWidth = width === undefined ? undefined : width * viewport.zoom;
+          const left = ((node.x ?? 0) + dxOf(id) + offset.x) * viewport.zoom - LABEL_INSET;
+          const top = ((node.y ?? 0) + offset.y) * viewport.zoom - LABEL_GAP;
           return (
-            <div key={id} className="frame-slot" style={{ left: (node.x ?? 0) + dxOf(id) + offset.x, top: (node.y ?? 0) + offset.y }}>
-              {node.type !== "text" && (
-                <div
+            <div
+                  key={id}
                   className={cn("frame-label", {
                     "is-selected": selection.includes(id),
+                    "is-hovered": hoverRoot === id,
                     "is-cramped": (screenWidth !== undefined && screenWidth < LABEL_MIN_WIDTH) || (labelRoom.get(id) ?? Infinity) * viewport.zoom < LABEL_HEIGHT,
                   })}
                   data-label-for={id}
                   title={nodeTitle(id, node)}
-                  style={{ transform: `scale(${1 / viewport.zoom}) translate(-${LABEL_INSET}px, -${LABEL_GAP}px)`, maxWidth: screenWidth === undefined ? undefined : screenWidth + 2 * LABEL_INSET }}
+                  style={{ left, top, maxWidth: screenWidth === undefined ? undefined : screenWidth + 2 * LABEL_INSET }}
                 >
                   <span className="frame-label-name">
                     {node.type === "frame" && node.component ? "◇ " : ""}
@@ -949,20 +1059,6 @@ export const Canvas = memo(function Canvas() {
                     </button>
                   )}
                 </div>
-              )}
-              <FrameView
-                id={id}
-                nodes={model.nodes}
-                childIds={model.children}
-                tokens={tokens}
-                icons={icons}
-                canvasMode={canvasMode}
-                componentProps={previewProps[id]}
-                fileCss={model.fileCss}
-                version={renderVersion}
-                frozen={!!editingText && rootOf(model, baseId(editingText)) === id}
-              />
-            </div>
           );
         })}
       </div>

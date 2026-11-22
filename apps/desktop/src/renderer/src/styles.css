@@ -70,21 +70,29 @@ kbd { font: 11px var(--font-mono); color: var(--color-ink-3); background: var(--
   --left-w: max(var(--left-min, 0px), var(--left-size)); --right-w: max(var(--right-min, 0px), var(--right-size));
 }
 .canvas { position: absolute; inset: 0; overflow: hidden; background: var(--color-bg); touch-action: none; }
-.canvas-grid { position: absolute; inset: 0; background-image: radial-gradient(circle, rgba(26, 25, 23, 0.09) 1px, transparent 1px); pointer-events: none; }
+/* Everything that moves with the view is its own compositing layer and moves by transform only. A repaint anywhere
+   makes the browser re-layer the whole canvas, which on a large design costs more than the frame budget. */
+.canvas-grid { position: absolute; inset: 0; background-image: radial-gradient(circle, rgba(26, 25, 23, 0.09) 1px, transparent 1px); pointer-events: none; will-change: transform; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+/* Frame and file labels, in screen pixels and translated by the pan (Canvas.tsx). */
+.canvas-labels { position: absolute; left: 0; top: 0; pointer-events: none; will-change: transform; }
+.canvas-labels > * { pointer-events: auto; }
 .frame-slot { position: absolute; }
 .frame-host { background: transparent; width: max-content; }
-.frame-label { position: absolute; bottom: 100%; left: 0; transform-origin: 0 100%; padding: 1px 4px; border-radius: 4px; line-height: 16px; font-size: 12px; color: var(--color-ink-3); white-space: nowrap; cursor: default; }
+/* Far out, a frame shows as a bitmap of itself (canvas/frameBitmaps.ts); a frame off screen isn't painted at all. The
+   live DOM stays laid out underneath, so measuring frames and their layers still works. */
+.frame-slot.shows-bitmap > .frame-host, .frame-slot.is-offscreen { visibility: hidden; }
+.frame-bitmap { position: absolute; left: 0; top: 0; max-width: none; user-select: none; }
+.frame-label { position: absolute; transform: translateY(-100%); padding: 1px 4px; border-radius: 4px; line-height: 16px; font-size: 12px; color: var(--color-ink-3); white-space: nowrap; cursor: default; }
 .frame-label.is-selected { color: var(--color-accent); }
 .frame-label { display: flex; align-items: center; gap: 4px; }
 .frame-label-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .frame-label.is-cramped { visibility: hidden; }
-.frame-label.is-selected, .frame-slot:hover .frame-label { max-width: none !important; visibility: visible; background: var(--color-bg); }
-.frame-slot:hover, .frame-slot:has(.frame-label.is-selected) { z-index: 1; }
+.frame-label:is(.is-selected, .is-hovered, :hover) { max-width: none !important; visibility: visible; background: var(--color-bg); z-index: 1; }
 .frame-slot:hover { z-index: 2; }
 .frame-label-play { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; color: var(--color-ink-3); opacity: 0; transition: opacity 120ms var(--ease-out-strong); }
 .frame-label-play:hover { background: var(--color-surface-2); color: var(--color-accent); }
-.frame-slot:hover .frame-label-play, .frame-label-play:focus-visible { opacity: 1; }
+.frame-label:is(.is-hovered, :hover) .frame-label-play, .frame-label-play:focus-visible { opacity: 1; }
 .overlay { position: absolute; inset: 0; pointer-events: none; }
 .ov-hover { position: absolute; outline: 2px solid var(--color-accent); outline-offset: 0; opacity: 0.55; }
 .ov-selection { position: absolute; outline: 1.5px solid var(--color-accent); }
@@ -473,7 +481,7 @@ kbd { font: 11px var(--font-mono); color: var(--color-ink-3); background: var(--
 .code-row { display: flex; align-items: center; gap: 6px; background: var(--color-surface-2); border-radius: 8px; padding: 6px 8px; }
 .code-row code { background: none; flex: 1; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
-.file-label { position: absolute; transform-origin: 0 0; font-weight: 600; font-size: 13px; color: var(--color-ink-2); white-space: nowrap; padding: 2px 6px; margin-left: -6px; border-radius: 6px; cursor: default; }
+.file-label { position: absolute; font-weight: 600; font-size: 13px; color: var(--color-ink-2); white-space: nowrap; padding: 2px 6px; margin-left: -6px; border-radius: 6px; cursor: default; }
 .file-label { display: flex; align-items: center; gap: 5px; }
 .file-label-icon { flex-shrink: 0; opacity: 0.7; }
 .file-label-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

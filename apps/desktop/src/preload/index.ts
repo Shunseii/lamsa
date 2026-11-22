@@ -28,6 +28,7 @@ const api: LamsaApi = {
   setOpenFiles: (paths) => ipcRenderer.invoke("set-open-files", paths),
   closeFile: (path) => ipcRenderer.invoke("close-file", path),
   render: (ids, mode) => ipcRenderer.invoke("render", ids, mode),
+  frameSnapshot: (request) => ipcRenderer.invoke("frame-snapshot", request),
   importImage: () => ipcRenderer.invoke("import-image"),
   revealPath: (path) => ipcRenderer.invoke("reveal-path", path),
   agentStatus: () => ipcRenderer.invoke("agent-status"),

@@ -120,6 +120,22 @@ export interface RenderResultSummary {
   height: number;
 }
 
+/** One top-level frame as the canvas rendered it, to be drawn into a small bitmap (main/frame-snapshots.ts). */
+export interface FrameSnapshotRequest {
+  /** The frame's shadow root contents: its styles and markup, with animations already at rest. */
+  html: string;
+  /** Project fonts, with URLs already pointing at this window's `lamsa-asset://` host. */
+  fontCss: string;
+  fontLinks: string[];
+  /** The frame's size in CSS pixels. */
+  width: number;
+  height: number;
+  /** Bitmap pixels per CSS pixel. */
+  scale: number;
+  /** Text styles the frame inherits from the canvas around it. */
+  inherited: Record<string, string>;
+}
+
 export interface LamsaApi {
   /** Host of this window's `lamsa-asset://` URLs: each window serves images and fonts from its own project. */
   assetHost: string;
@@ -154,6 +170,8 @@ export interface LamsaApi {
   /** Hides a file from the editor; it stays loaded so instances of its components keep rendering. */
   closeFile(path: string): Promise<string[]>;
   render(ids: string[], mode?: "light" | "dark"): Promise<RenderResultSummary[]>;
+  /** A PNG of a frame as the canvas shows it; null when it couldn't be drawn. */
+  frameSnapshot(request: FrameSnapshotRequest): Promise<Uint8Array | null>;
   importImage(): Promise<{ src: string } | null>;
   revealPath(path: string): Promise<void>;
   /** Whether the agent chat can run; null when no project is open. */

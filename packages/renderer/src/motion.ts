@@ -63,6 +63,25 @@ export function settleAnimations(scope: Document | ShadowRoot): void {
   }
 }
 
+/**
+ * Like settleAnimations, but leaves nothing running: each animation's resting value is written onto its element's
+ * style and the animation is cancelled. A paused animation still gets its own compositing layer (and so does
+ * everything drawn over it), which makes every pan and zoom of a large canvas slow; a plain style costs nothing.
+ * An animation whose value can't be written (one on a pseudo-element) stays parked instead.
+ */
+export function freezeAnimations(scope: Document | ShadowRoot): void {
+  settleAnimations(scope);
+  for (const animation of scope.getAnimations()) {
+    try {
+      if (animation.effect instanceof KeyframeEffect && animation.effect.pseudoElement) continue;
+      animation.commitStyles();
+      animation.cancel();
+    } catch {
+      // Not rendered or not committable: it stays parked, which looks the same.
+    }
+  }
+}
+
 /** Milliseconds until every animation under `scope` ends; an infinite one counts one iteration. */
 export function motionLength(scope: Document | ShadowRoot): number {
   let end = 0;

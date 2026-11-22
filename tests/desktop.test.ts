@@ -368,6 +368,39 @@ describe("desktop editor canvas", () => {
     await expect.poll(() => Object.keys(design("checkout.lamsa.json").nodes).length).toBe(before + 3);
   });
 
+  it("shows frames as bitmaps when zoomed far out, which still hover and select, and live again zoomed in", async () => {
+    await win.keyboard.press("Escape");
+    const zoom = async () => Number.parseInt((await win.locator(".zoom .ghost-btn").textContent()) ?? "", 10);
+    const wheel = async (deltaY: number) => {
+      await win.mouse.move(800, 500);
+      await win.keyboard.down("Control");
+      await win.mouse.wheel(0, deltaY);
+      await win.keyboard.up("Control");
+      await win.waitForTimeout(50);
+    };
+    let notches = 0;
+    while ((await zoom()) >= 20 && notches < 30) {
+      await wheel(100);
+      notches++;
+    }
+    await expect.poll(() => win.locator(".frame-slot.shows-bitmap").count(), { timeout: 15_000 }).toBeGreaterThan(0);
+    const bitmap = win.locator(".frame-slot.shows-bitmap .frame-bitmap").first();
+    const box = (await bitmap.boundingBox())!;
+    await win.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await expect.poll(() => win.locator(".ov-hover").count()).toBe(1);
+    await win.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    // The frame, or the layer in it under the pointer when the frame was already entered.
+    await expect.poll(() => win.locator(".ov-selection").count()).toBe(1);
+    const selected = (await win.locator(".ov-selection").boundingBox())!;
+    expect(selected.x).toBeGreaterThanOrEqual(box.x - 1);
+    expect(selected.y).toBeGreaterThanOrEqual(box.y - 1);
+    expect(selected.x + selected.width).toBeLessThanOrEqual(box.x + box.width + 1);
+    expect(selected.y + selected.height).toBeLessThanOrEqual(box.y + box.height + 1);
+    for (let i = 0; i < notches; i++) await wheel(-100);
+    await expect.poll(() => win.locator(".frame-slot.shows-bitmap").count()).toBe(0);
+    await win.keyboard.press("Escape");
+  });
+
   it("validates cleanly after all the edits", () => {
     const result = spawnSync(process.execPath, [CLI, "--json", "validate"], { cwd: canvasRoot, encoding: "utf8" });
     expect(JSON.parse(result.stdout)).toMatchObject({ errors: 0 });
@@ -606,7 +639,7 @@ describe("desktop editor selection and moving", () => {
     const labels = () =>
       win.evaluate(() =>
         [...document.querySelectorAll<HTMLElement>(".frame-label")]
-          .filter((label) => !label.closest(".frame-slot")!.matches(":hover") && !label.classList.contains("is-selected"))
+          .filter((label) => !label.matches(":hover") && !label.classList.contains("is-hovered") && !label.classList.contains("is-selected"))
           .map((label) => {
             const host = document.querySelector<HTMLElement>(`[data-root-id="${label.dataset.labelFor}"]`)!;
             const box = label.getBoundingClientRect();

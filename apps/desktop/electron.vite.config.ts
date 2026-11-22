@@ -15,6 +15,6 @@ export default defineConfig({
   renderer: {
     root: resolve(__dirname, "src/renderer"),
     plugins: [react(), tailwindcss()],
-    build: { rollupOptions: { input: { index: resolve(__dirname, "src/renderer/index.html") } } },
+    build: { rollupOptions: { input: { index: resolve(__dirname, "src/renderer/index.html"), snapshot: resolve(__dirname, "src/renderer/snapshot.html") } } },
   },
 });

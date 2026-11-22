@@ -5,10 +5,11 @@ import { basename, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, screen, shell } from "electron";
 import { checkFileCss, checkNodeCss, findProjectRoot, formatFileCss, formatNodeCss, lucideIconNames } from "@lamsa/core";
-import type { Change, CommentRequest, CssScope, OpenRequest, ProjectSnapshot, RecentProject, WelcomeState } from "../shared/api.js";
+import type { Change, CommentRequest, CssScope, FrameSnapshotRequest, OpenRequest, ProjectSnapshot, RecentProject, WelcomeState } from "../shared/api.js";
 import { CommentsService } from "./comments-service.js";
 import { ProjectService } from "./project-service.js";
 import { createAgent, registerAgentIpc, type WindowAgent } from "./agent/ipc.js";
+import { FrameSnapshots } from "./frame-snapshots.js";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const hidden = Boolean(process.env.LAMSA_HIDDEN);
@@ -46,6 +47,8 @@ interface ProjectWindow {
   service: ProjectService;
   comments: CommentsService;
   agent: WindowAgent;
+  /** Draws the bitmaps the canvas shows for frames when zoomed far out. */
+  snapshots: FrameSnapshots;
   send: (channel: string, value: unknown) => void;
   /** Taken by the page when it loads: the project, file, and selection to open. */
   pending: OpenRequest;
@@ -135,18 +138,26 @@ function createWindow(request: OpenRequest): ProjectWindow {
   });
   const agent = createAgent({ service, send });
   const comments = new CommentsService((state) => send("comments-changed", state));
-  const context: ProjectWindow = { window, assetHost, service, comments, agent, send, pending: request, opening: rootOf(request) };
+  const snapshots = new FrameSnapshots((page) => loadPage(page, "snapshot.html"));
+  const context: ProjectWindow = { window, assetHost, service, comments, agent, snapshots, send, pending: request, opening: rootOf(request) };
   const id = window.webContents.id;
   windows.set(id, context);
   window.on("closed", () => {
     windows.delete(id);
     agent.stop();
+    snapshots.close();
     void service.close();
     void comments.close();
   });
-  if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(process.env.ELECTRON_RENDERER_URL);
-  else void window.loadFile(join(here, "../renderer/index.html"));
+  void loadPage(window, "index.html");
   return context;
+}
+
+/** Loads one of the renderer's pages, from the dev server when there is one. */
+function loadPage(window: BrowserWindow, page: string): Promise<void> {
+  const devServer = process.env.ELECTRON_RENDERER_URL;
+  if (devServer) return window.loadURL(page === "index.html" ? devServer : new URL(page, `${devServer.replace(/\/?$/, "/")}`).href);
+  return window.loadFile(join(here, "../renderer", page));
 }
 
 /** Brings a window to the front. Hidden runs (tests) leave windows hidden, since focusing one would show it. */
@@ -311,6 +322,8 @@ function registerIpc() {
     });
     return frames.map((f) => ({ id: f.id, path: f.path, width: f.width, height: f.height }));
   });
+
+  handle("frame-snapshot", (context, request: FrameSnapshotRequest) => context.snapshots.capture(request));
 
   handle("import-image", async (context) => {
     const root = context.service.root;

@@ -1,7 +1,8 @@
-import { baseCss, buildRenderTree, settleAnimations, toHtml, withoutPointerStates } from "@lamsa/renderer";
+import { baseCss, buildRenderTree, freezeAnimations, toHtml, withoutPointerStates } from "@lamsa/renderer";
 import type { DesignNode, TokenMode, TokenSet } from "@lamsa/schema";
 import { memo, useLayoutEffect, useRef } from "react";
 import type { NodeMap } from "../lib/model";
+import { frameRemoved, frameRendered } from "./frameBitmaps";
 
 export const shadowRoots = new Map<string, ShadowRoot>();
 
@@ -84,6 +85,7 @@ export const FrameView = memo(function FrameView({ id, nodes, childIds: children
     shadowRoots.set(id, root);
     return () => {
       shadowRoots.delete(id);
+      frameRemoved(id);
     };
   }, [id]);
 
@@ -105,9 +107,10 @@ export const FrameView = memo(function FrameView({ id, nodes, childIds: children
       fileCss,
     });
     root.innerHTML = `<style>${shadowCss(tokens)}\n${withoutPointerStates(result.css)}</style><div class="lamsa-surface ${result.mode}">${toHtml(result.root)}</div>`;
-    // The canvas shows motion at rest: entrances at their end, loops parked, and no hover or press.
+    // The canvas shows motion at rest: entrances at their end, loops at their start, and no hover or press.
     // The preview plays them.
-    settleAnimations(root);
+    freezeAnimations(root);
+    frameRendered(id);
   }, [id, nodes, children, tokens, icons, canvasMode, version, frozen, componentProps, fileCss]);
 
   return <div ref={host} className="frame-host" data-root-id={id} />;

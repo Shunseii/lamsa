@@ -29,6 +29,9 @@ async function timeShortcut({ key, ready }: { key: string; ready: string }): Pro
   );
 }
 
+/** Zoomed far out, frames swap to bitmaps as they're drawn; tests that count canvas changes wait for that to finish. */
+const bitmapsDrawn = () => page.waitForFunction(() => !document.querySelector(".canvas[data-drawing-bitmaps]"), null, { timeout: 60_000 });
+
 describe("editor with a large project", () => {
   beforeAll(async () => {
     stressRoot = makeStressProject({ nodes: 10_000 });
@@ -81,6 +84,7 @@ describe("editor with a large project", () => {
   });
 
   it("drags a panel tab between docks without touching the canvas until the drop", async () => {
+    await bitmapsDrawn();
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Performance.enable");
     const styleWork = async () => {
@@ -134,6 +138,7 @@ describe("editor with a large project", () => {
   });
 
   it("opens and closes the preview dock without touching or restyling the canvas", async () => {
+    await bitmapsDrawn();
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Performance.enable");
     const styleMs = async () => {
@@ -173,7 +178,9 @@ describe("editor with a large project", () => {
         if (!inner) continue;
         const r = inner.getBoundingClientRect();
         const center = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-        if (r.width < 2 || r.height < 2 || document.elementFromPoint(center.x, center.y) !== host) continue;
+        // Zoomed far out the frame shows as a bitmap of itself, which picks layers the same way.
+        const hit = document.elementFromPoint(center.x, center.y);
+        if (r.width < 2 || r.height < 2 || (hit !== host && hit?.getAttribute("data-bitmap-for") !== host.dataset.rootId)) continue;
         return { id: inner.dataset.nodeId!, ...center };
       }
       throw new Error("no frame is clear of the panels");

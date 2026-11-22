@@ -3,7 +3,7 @@
 /* The viewport is set straight on the pins' wrapper (no React render): it is translated by the pan and carries --zoom.
    Each pin has its point in world pixels as --wx/--wy, so pan and zoom move pins without touching anything else. */
 .comment-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.comment-pins { position: absolute; left: 0; top: 0; --zoom: 1; }
+.comment-pins { position: absolute; left: 0; top: 0; --zoom: 1; will-change: transform; }
 .comment-cards { position: absolute; inset: 0; }
 .comment-pin {
   position: absolute; left: 0; top: -28px; width: 28px; height: 28px; pointer-events: auto;
