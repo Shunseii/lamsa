@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/banner.png" alt="lamsa: a local-first design tool. Designs are JSON in your repo, your coding agent does the work, you add the touch."></p>
+
 # lamsa
 
 lamsa (لمسة, "a touch") is an open-source, local-first design tool for developers and design engineers. Designs are plain JSON files in your app's repo, reviewed in pull requests. Your own coding agent does the bulk of the work through the `lamsa` CLI; you add the touch in a desktop editor.

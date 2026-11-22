@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400;500&family=Instrument+Serif&family=IBM+Plex+Sans+Arabic:wght@600&display=block">
+<style>
+  :root { --ink:#1b1a17; --ink2:#5c5a54; --accent:#1F5FA8; --bg:#f3f2ee; --line:#dcdad3; }
+  * { box-sizing:border-box; margin:0; }
+  html,body { width:1280px; height:640px; overflow:hidden; }
+  body { background:var(--bg); font-family:Geist, sans-serif; color:var(--ink); position:relative;
+    background-image: radial-gradient(circle at 1px 1px, rgba(0,0,0,.09) 1px, transparent 0); background-size:16px 16px; }
+  body::after { content:""; position:absolute; inset:0; background: radial-gradient(ellipse 70% 90% at 20% 50%, var(--bg) 35%, transparent 75%); pointer-events:none; }
+  .copy { position:absolute; left:72px; top:0; bottom:0; width:470px; display:flex; flex-direction:column; justify-content:center; z-index:2; }
+  .icon { width:76px; height:76px; border-radius:18px; box-shadow:0 10px 30px rgba(31,95,168,.28); margin-bottom:28px; }
+  h1 { font-family:"Instrument Serif", serif; font-weight:400; font-size:84px; line-height:1; letter-spacing:-1px; display:flex; align-items:baseline; gap:18px; }
+  h1 .ar { font-family:"IBM Plex Sans Arabic", sans-serif; font-weight:600; font-size:56px; color:var(--accent); }
+  .tag { margin-top:20px; font-size:22px; line-height:1.4; color:var(--ink2); max-width:440px; }
+  .tag b { color:var(--ink); font-weight:600; }
+  .cli { margin-top:30px; display:inline-flex; align-self:flex-start; align-items:center; gap:10px; padding:11px 16px; border-radius:10px; background:#1b1a17; color:#f3f2ee; font:500 15px "Geist Mono", monospace; box-shadow:0 6px 18px rgba(0,0,0,.15); }
+  .cli span { color:#8fb6e8; }
+  .shots { position:absolute; inset:0; z-index:1; }
+  .shot { position:absolute; border-radius:12px; overflow:hidden; background:#fff; border:1px solid var(--line);
+    box-shadow:0 2px 6px rgba(0,0,0,.06), 0 24px 60px rgba(20,20,15,.18); }
+  .shot img { display:block; position:absolute; }
+  .main { left:600px; top:70px; width:760px; height:475px; transform:rotate(-2deg); }
+  .main img { width:760px; left:0; top:0; }
+  .dark { left:585px; top:290px; width:250px; height:300px; transform:rotate(3deg); z-index:2; background:#0a0a0a; }
+  .dark img { width:1061px; left:-394px; top:-106px; }
+  .thread { left:960px; top:380px; width:285px; height:228px; transform:rotate(-1.5deg); z-index:3; }
+  .thread img { width:1530px; left:-918px; top:-719px; }
+</style></head>
+<body>
+  <div class="copy">
+    <img class="icon" src="../../apps/desktop/resources/icon.svg">
+    <h1>lamsa <span class="ar">لمسة</span></h1>
+    <p class="tag">A local-first design tool. Designs are <b>JSON in your repo</b>, your coding agent does the work, <b>you add the touch.</b></p>
+    <div class="cli"><span>$</span> lamsa init --agent claude</div>
+  </div>
+  <div class="shots">
+    <div class="shot main"><img src="../screenshots/editor.png"></div>
+    <div class="shot dark"><img src="../screenshots/dark.png"></div>
+    <div class="shot thread"><img src="../screenshots/comments.png"></div>
+  </div>
+</body></html>
