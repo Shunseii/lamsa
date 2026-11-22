@@ -8,6 +8,8 @@ lamsa (لمسة, "a touch") is an open-source, local-first design tool for devel
 - **Tokens come from your code.** shadcn / Tailwind v4 `globals.css` is read directly.
 - **Agent-complete.** Init, design, validate, render and review all run headless.
 
+![The lamsa editor with a checkout screen open and its pay button selected](docs/screenshots/editor.png)
+
 ```sh
 lamsa init --agent claude --yes       # config, agent skill, AGENTS.md section
 lamsa tokens                          # what your app's CSS defines
@@ -15,6 +17,20 @@ lamsa add --file designs/home.lamsa.json --tree '{"type":"frame","name":"Home","
 lamsa validate                        # errors name the node ID and a fix
 lamsa render Home                     # PNGs in .lamsa/render/
 ```
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/comments.png" alt="A comment on the pay button, answered by the agent"></td>
+    <td><img src="docs/screenshots/dark.png" alt="The same screen previewed in dark mode"></td>
+  </tr>
+  <tr>
+    <td>Comment on any layer; your agent reads and answers them with <code>lamsa comments</code>.</td>
+    <td>Preview light and dark straight from your app's tokens.</td>
+  </tr>
+</table>
+
+![lamsa's own editor designs, open in lamsa](docs/screenshots/lamsa-designs-itself.png)
+<p align="center"><sub>lamsa is designed in lamsa: <code>designs/editor.lamsa.json</code></sub></p>
 
 See [SPEC.md](SPEC.md) for the design and `examples/shadcn-app` for a working project.
 
