@@ -168,3 +168,36 @@ describe("one window per project", () => {
     expect(await windowCount()).toBe(1);
   });
 });
+
+describe("the hidden page that draws frame pictures", () => {
+  it("closes with its window, so lamsa quits as soon as the last window closes", async () => {
+    const root = project("snapshot-quit");
+    const app = await _electron.launch({
+      executablePath: ELECTRON,
+      args: [DESKTOP, "--root", root],
+      env: { ...process.env, LAMSA_HIDDEN: "1", LAMSA_MULTI_INSTANCE: "1" },
+    });
+    const page = await app.firstWindow();
+    await page.getByTestId("project-menu").waitFor();
+    const windowCount = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+
+    const png = await page.evaluate(() =>
+      (window as unknown as { lamsa: { frameSnapshot(request: unknown): Promise<Uint8Array | null> } }).lamsa.frameSnapshot({
+        html: "<div style='width:100px;height:100px;background:red'></div>",
+        fontCss: "",
+        fontLinks: [],
+        width: 100,
+        height: 100,
+        scale: 0.25,
+        inherited: {},
+      }),
+    );
+    expect(png?.length).toBeGreaterThan(0);
+    expect(await windowCount()).toBe(2);
+
+    const exited = new Promise<number>((resolve) => app.process().once("exit", () => resolve(Date.now())));
+    const closedAt = Date.now();
+    await closeWindow(page);
+    expect((await exited) - closedAt).toBeLessThan(5_000);
+  }, 60_000);
+});
