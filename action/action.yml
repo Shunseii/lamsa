@@ -1,5 +1,5 @@
 name: lamsa PR preview
-description: Render before/after images of changed lamsa designs and post them, with a semantic diff, as a pull request comment.
+description: Render before/after images of changed lamsa designs, with changed layers outlined, and post them with a semantic diff as a pull request comment.
 branding:
   icon: image
   color: orange
@@ -42,8 +42,8 @@ runs:
         REPO: ${{ github.repository }}
       run: |
         set -euo pipefail
-        out="$RUNNER_TEMP/lamsa-report"
-        npx --yes "lamsa@${VERSION}" report --base "$BASE" --out "$out" \
+        out="$RUNNER_TEMP/lamsa-diff"
+        npx --yes "lamsa@${VERSION}" diff "$BASE" --out "$out" \
           --image-base-url "https://github.com/${REPO}/raw/${BRANCH}/pr-${PR}/${SHA}"
         echo "report=$out/report.md" >> "$GITHUB_OUTPUT"
         echo "dir=$out" >> "$GITHUB_OUTPUT"
@@ -74,7 +74,7 @@ runs:
 
         body="$DIR/report.md"
         existing=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
-          --jq '[.[] | select(.body | startswith("<!-- lamsa-report -->"))][0].id // empty')
+          --jq '[.[] | select(.body | startswith("<!-- lamsa-diff -->") or startswith("<!-- lamsa-report -->"))][0].id // empty')
         if [ -n "$existing" ]; then
           gh api --method PATCH "repos/${REPO}/issues/comments/${existing}" -F "body=@${body}" >/dev/null
         else

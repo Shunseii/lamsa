@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,6 +8,9 @@ import {
   buildChildIndex,
   childrenOf,
   deleteNodes,
+  designFilesAtRef,
+  diffAgainstRef,
+  diffDesignFiles,
   checkFileCss,
   checkNodeCss,
   cssStateNames,
@@ -239,5 +243,91 @@ describe("agent activity", () => {
     expect(await readActivity(root)).toBeUndefined();
     writeFileSync(join(root, ACTIVITY_FILE), "{ half");
     expect(await readActivity(root)).toBeUndefined();
+  });
+});
+
+describe("design diff", () => {
+  const file = (nodes: Record<string, unknown>) => ({ version: 1, nodes });
+  const frame = (extra: Record<string, unknown> = {}) => ({ type: "frame", style: { width: 100, height: 100 }, ...extra });
+  const before = file({
+    screen: frame({ name: "Checkout", x: 0, y: 0 }),
+    pay: { type: "text", name: "Pay", content: "Pay", parentId: "screen", index: "a0", style: { width: 342 } },
+    old: { type: "text", content: "Old banner", parentId: "screen", index: "a1" },
+    a: { type: "text", content: "A", parentId: "screen", index: "a2" },
+    other: frame({ name: "Elsewhere", x: 400, y: 0 }),
+    button: frame({ name: "Button", component: true, x: 800, y: 0 }),
+    label: { type: "text", content: "Go", parentId: "button", index: "a0" },
+    page: frame({ name: "Uses button", x: 1200, y: 0 }),
+    use: { type: "instance", componentId: "button", parentId: "page", index: "a0" },
+  });
+  const after = file({
+    screen: frame({ name: "Checkout", x: 0, y: 0 }),
+    pay: { type: "text", name: "Pay", content: "Pay $48.00", parentId: "screen", index: "a0", style: { width: "100%" } },
+    a: { type: "text", content: "A", parentId: "screen", index: "a9" },
+    error: { type: "text", content: "Card declined", parentId: "screen", index: "a3" },
+    other: frame({ name: "Elsewhere", x: 400, y: 500 }),
+    button: frame({ name: "Button", component: true, x: 800, y: 0 }),
+    label: { type: "text", content: "Go now", parentId: "button", index: "a0" },
+    page: frame({ name: "Uses button", x: 1200, y: 0 }),
+    use: { type: "instance", componentId: "button", parentId: "page", index: "a0" },
+    fresh: frame({ name: "New screen", x: 1600, y: 0 }),
+  });
+  const diff = diffDesignFiles({
+    before: [["designs/a.lamsa.json", before]],
+    after: [["designs/a.lamsa.json", after]],
+    base: "main",
+    head: "working tree",
+  });
+
+  it("names each value that changed, from what to what", () => {
+    const pay = diff.changes.find((change) => change.id === "pay")!;
+    expect(pay.values).toEqual([
+      { field: "content", before: "Pay", after: "Pay $48.00" },
+      { field: "style.width", before: 342, after: "100%" },
+    ]);
+    expect(diff.changes.find((change) => change.id === "a")!.fields).toEqual(["index"]);
+    expect(diff.changes.find((change) => change.id === "old")).toMatchObject({ kind: "removed", text: "Old banner", screen: "screen" });
+  });
+
+  it("groups changes by screen with the layers to outline on each side", () => {
+    const checkout = diff.screens.find((screen) => screen.id === "screen")!;
+    expect(checkout).toMatchObject({ kind: "changed", added: ["error"], removed: ["old"] });
+    expect(checkout.changed.sort()).toEqual(["a", "pay"]);
+    expect(diff.screens.find((screen) => screen.id === "fresh")).toMatchObject({ kind: "added", added: [] });
+  });
+
+  it("follows a changed component into the screens that place it", () => {
+    expect(diff.screens.find((screen) => screen.id === "page")).toMatchObject({ kind: "changed", components: ["button"], changed: ["label"] });
+  });
+
+  it("keeps a screen that only moved on the canvas out of the changed screens", () => {
+    expect(diff.screens.some((screen) => screen.id === "other")).toBe(false);
+    expect(diff.repositioned).toEqual(["other"]);
+  });
+
+  it("limits changes to the files asked for", () => {
+    const only = diffDesignFiles({
+      before: [["designs/a.lamsa.json", before], ["designs/b.lamsa.json", file({ b: frame() })]],
+      after: [["designs/a.lamsa.json", before], ["designs/b.lamsa.json", file({ b: frame({ name: "B" }) })]],
+      base: "main",
+      head: "working tree",
+      only: ["designs/b.lamsa.json"],
+    });
+    expect(only.changes.map((change) => change.id)).toEqual(["b"]);
+  });
+
+  it("reads a ref's design files by that ref's own design globs, not every JSON design in the repo", async () => {
+    const root = tempRepo({
+      "lamsa.config.json": { designs: ["designs/**/*.lamsa.json"] },
+      "designs/a.lamsa.json": file({ screen: frame({ name: "A" }) }),
+      "examples/app/designs/b.lamsa.json": file({ example: frame({ name: "Example" }) }),
+    });
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
+    git("init", "-q");
+    git("add", ".");
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base");
+    const files = designFilesAtRef({ root, ref: "HEAD", fallback: (await loadProject(root)).config });
+    expect([...files.keys()]).toEqual(["designs/a.lamsa.json"]);
+    expect(diffAgainstRef({ project: await loadProject(root), ref: "HEAD" }).changes).toEqual([]);
   });
 });

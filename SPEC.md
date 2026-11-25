@@ -172,7 +172,7 @@ Before launch: confirm with agent vendors' terms that driving their CLI headless
 
 ## Pull request review
 
-An opt-in GitHub Action (`action/`) posts before/after PNGs and a semantic diff (nodes added/removed/changed) on PRs. It re-renders every screen that depends on a changed component. It is a thin wrapper over `lamsa report`, so the same review runs locally; images go to a separate `lamsa-previews` branch and the comment updates in place on each push.
+`lamsa diff [base] [head]` renders every screen a change touches before and after, outlining new layers in green, changed ones in amber and removed ones in red, and lists what each value changed from and to. It re-renders every screen that depends on a changed component, and sets aside screens that render the same or only moved on the canvas. It writes a page with a side-by-side and slider view (`.lamsa/diff/index.html`) and a markdown report for PRs; `--text` skips rendering. An opt-in GitHub Action (`action/`) posts that report on PRs. It is a thin wrapper over `lamsa diff`, so the same review runs locally; images go to a separate `lamsa-previews` branch and the comment updates in place on each push.
 
 ## Stack
 

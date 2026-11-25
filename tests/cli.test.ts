@@ -108,6 +108,66 @@ describe("lamsa CLI (agent loop, no editor)", () => {
   });
 });
 
+describe("lamsa diff", () => {
+  it("renders changed screens before and after, outlines what changed, and writes a page and a PR report", () => {
+    const design = (nodes: Record<string, unknown>) => ({ version: 1, nodes });
+    const screen = { type: "frame", name: "Checkout", x: 0, y: 0, style: { width: 240, height: 160, background: "#ffffff", display: "flex", "flex-direction": "column", gap: 8, padding: 16 } };
+    const root = tempRepo({
+      "lamsa.config.json": { tokens: { adapter: "none" } },
+      "designs/checkout.lamsa.json": design({
+        Scr00001: screen,
+        Pay00001: { type: "frame", name: "Pay", parentId: "Scr00001", index: "a0", style: { width: 120, height: 32, background: "#111111" } },
+        Same0001: { type: "frame", name: "Still", x: 400, y: 0, style: { width: 80, height: 80, background: "#eeeeee" } },
+      }),
+    });
+    const git = (...args: string[]) => spawnSync("git", args, { cwd: root });
+    git("init", "-q");
+    git("add", ".");
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base");
+    expect(lamsa(root, "diff", "--text", "--exit-code").code).toBe(0);
+
+    writeFileSync(
+      join(root, "designs/checkout.lamsa.json"),
+      JSON.stringify(
+        design({
+          Scr00001: screen,
+          Pay00001: { type: "frame", name: "Pay", parentId: "Scr00001", index: "a0", style: { width: 200, height: 32, background: "#111111" } },
+          Err00001: { type: "text", content: "Card declined", parentId: "Scr00001", index: "a1" },
+          Same0001: { type: "frame", name: "Still", x: 400, y: 0, style: { width: 80, height: 80, background: "#eeeeee" }, hidden: false },
+        }),
+      ),
+    );
+
+    const text = lamsa(root, "diff", "--text", "--exit-code");
+    expect(text.code).toBe(1);
+    const pay = (text.json.changes as { id: string; values?: unknown[] }[]).find((change) => change.id === "Pay00001");
+    expect(pay?.values).toEqual([{ field: "style.width", before: 120, after: 200 }]);
+    expect(existsSync(join(root, ".lamsa/diff"))).toBe(false);
+
+    const rendered = lamsa(root, "diff", "--scale", "1");
+    expect(rendered.code).toBe(0);
+    type Screen = { id: string; before?: string; after?: string; afterMarked?: string; beforeMarked?: string; visible?: boolean };
+    const screens = rendered.json.screens as Screen[];
+    const checkout = screens.find((s) => s.id === "Scr00001")!;
+    expect(checkout).toMatchObject({ visible: true, before: "Scr00001.before.png", after: "Scr00001.after.png", afterMarked: "Scr00001.after.marked.png" });
+    const dir = join(root, ".lamsa/diff");
+    const plain = readFileSync(join(dir, "Scr00001.after.png"));
+    const marked = readFileSync(join(dir, "Scr00001.after.marked.png"));
+    expect(marked.subarray(1, 4).toString()).toBe("PNG");
+    expect(marked.equals(plain)).toBe(false);
+    // A field change that renders the same is kept out of the pictures.
+    expect(screens.find((s) => s.id === "Same0001")).toMatchObject({ visible: false });
+
+    const page = readFileSync(join(dir, "index.html"), "utf8");
+    expect(page).toContain("Scr00001.after.marked.png");
+    expect(page).toContain("width 120 → 200");
+    const report = readFileSync(join(dir, "report.md"), "utf8");
+    expect(report).toContain("<!-- lamsa-diff -->");
+    expect(report).toContain('"Card declined"');
+    expect(report).toMatch(/No visible change: Still/);
+  }, 60_000);
+});
+
 describe("lamsa CLI activity for the editor", () => {
   const readActivityFile = (root: string) => JSON.parse(readFileSync(join(root, ".lamsa/activity.json"), "utf8")) as Record<string, unknown>;
   const asAgent = (name: string) => ({ LAMSA_AGENT_NAME: name, CLAUDECODE: "" });

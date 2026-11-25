@@ -1,7 +1,6 @@
 import {
   allNodes,
   buildChildIndex,
-  diffAgainstRef,
   didYouMean,
   indexNodes,
   isDesignFile,
@@ -161,19 +160,3 @@ export async function selectionCommand({ out }: { out: Output }): Promise<number
   return ExitCode.ok;
 }
 
-export async function diffCommand({ out, ref }: { out: Output; ref: string }): Promise<number> {
-  const { project } = await openWorkspace();
-  const diff = diffAgainstRef({ project, ref });
-  out.result({ ok: true, ...diff }, () => {
-    if (diff.changes.length === 0) return `no design changes since ${ref}`;
-    const symbol = { added: "+", removed: "-", changed: "~" } as const;
-    return [
-      ...diff.changes.map(
-        (c) =>
-          `${symbol[c.kind]} ${c.type} ${c.id}${c.name ? ` ${JSON.stringify(c.name)}` : ""} · ${c.file}${c.fields ? ` · ${c.fields.join(", ")}` : ""}`,
-      ),
-      `affected screens: ${diff.affectedRoots.join(", ") || "none"}`,
-    ].join("\n");
-  });
-  return ExitCode.ok;
-}

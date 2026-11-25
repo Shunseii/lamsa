@@ -14,8 +14,16 @@ import { CliError, ExitCode } from "./output.js";
 
 const require = createRequire(import.meta.url);
 
+/** Layers to outline in one colour on a second, marked copy of a render. */
+export interface Mark {
+  ids: string[];
+  color: string;
+}
+
 export interface RenderedFrame {
   id: string;
+  /** With `marks`: the copy with the marked layers outlined. */
+  markedPath?: string;
   name?: string;
   path: string;
   width: number;
@@ -60,6 +68,36 @@ async function captureStrip({ page, frames, path, label }: { page: Page; frames:
   return times;
 }
 
+/**
+ * Outlines layers over the render. A layer inside a component instance renders as `<instance>/<layer>`,
+ * so a component's own layer IDs find it in every instance.
+ */
+function drawMarks(marks: Mark[]) {
+  const target = document.querySelector("#lamsa-render > div");
+  if (!target) return;
+  const frame = target.getBoundingClientRect();
+  const layer = document.createElement("div");
+  layer.id = "lamsa-marks";
+  layer.style.cssText = `position:absolute;left:${frame.left + scrollX}px;top:${frame.top + scrollY}px;width:${frame.width}px;height:${frame.height}px;pointer-events:none;z-index:2147483647`;
+  for (const { ids, color } of marks) {
+    for (const id of ids) {
+      const escaped = CSS.escape(id);
+      for (const element of Array.from(document.querySelectorAll(`[data-node-id="${escaped}"], [data-node-id$="/${escaped}"]`))) {
+        const box = element.getBoundingClientRect();
+        if (box.width === 0 && box.height === 0) continue;
+        const outline = document.createElement("div");
+        const left = Math.max(0, box.left - frame.left - 2);
+        const top = Math.max(0, box.top - frame.top - 2);
+        const right = Math.min(frame.width, box.right - frame.left + 2);
+        const bottom = Math.min(frame.height, box.bottom - frame.top + 2);
+        outline.style.cssText = `position:absolute;left:${left}px;top:${top}px;width:${right - left}px;height:${bottom - top}px;border:2px solid ${color};border-radius:4px;background:color-mix(in srgb, ${color} 12%, transparent);box-sizing:border-box`;
+        layer.append(outline);
+      }
+    }
+  }
+  document.body.append(layer);
+}
+
 function installChromium(log: (message: string) => void) {
   if (process.env.LAMSA_NO_BROWSER_DOWNLOAD) {
     throw new CliError(
@@ -102,6 +140,8 @@ export async function renderFrames({
   log,
   animate,
   state,
+  marks,
+  markedNaming,
 }: {
   workspace: Workspace;
   ids: string[];
@@ -114,6 +154,9 @@ export async function renderFrames({
   animate?: number;
   /** Put every node into this state first: hover, press, focus, or a `data-state` value. */
   state?: string;
+  /** Per frame, layers to outline in a second copy of the render, named by `markedNaming`. */
+  marks?: Record<string, Mark[]>;
+  markedNaming?: (id: string) => string;
 }): Promise<RenderedFrame[]> {
   const { project, tokens, fonts } = workspace;
   const nodes = allNodes(project);
@@ -152,7 +195,15 @@ export async function renderFrames({
       let times: number[] | undefined;
       if (animate) times = await captureStrip({ page, frames: animate, path, label: `${nodes[id]?.name ?? id}${state ? ` · ${state}` : ""}` });
       else await target.screenshot({ path, omitBackground: true });
+      let markedPath: string | undefined;
+      const frameMarks = marks?.[id]?.filter((mark) => mark.ids.length > 0);
+      if (!animate && frameMarks?.length && markedNaming) {
+        markedPath = join(outDir, markedNaming(id));
+        await page.evaluate(call(drawMarks, frameMarks));
+        await target.screenshot({ path: markedPath, omitBackground: true });
+      }
       results.push({
+        markedPath,
         times,
         id,
         name: nodes[id]?.name,

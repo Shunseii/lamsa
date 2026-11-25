@@ -1,6 +1,6 @@
 # lamsa PR preview action
 
-Posts before/after images of every screen a pull request changes, plus a node-level diff, as one comment that updates on each push. Screens that use a changed component are re-rendered too.
+Posts before/after images of every screen a pull request changes, with new, changed and removed layers outlined in green, amber and red, plus what each value changed from and to. It's one comment that updates on each push. Screens that use a changed component are re-rendered too.
 
 ```yaml
 # .github/workflows/lamsa.yml
@@ -21,4 +21,4 @@ jobs:
       - uses: Shunseii/lamsa/action@main
 ```
 
-Images live on a separate `lamsa-previews` branch so they never touch your history. The same report runs locally: `lamsa report --base origin/main`.
+Images live on a separate `lamsa-previews` branch so they never touch your history. The same diff runs locally: `lamsa diff origin/main --open`.

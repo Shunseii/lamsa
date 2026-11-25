@@ -103,8 +103,7 @@ Use it with `{ "type": "instance", "componentId": "Bt9xQ2mL", "props": { "varian
 | `lamsa split <id> --to <file>` | Move a top-level node into another file |
 | `lamsa validate` / `lamsa fmt [--fix]` | Check; normalise (flatten nested input, fill indexes, sort keys; `--fix` drops orphans) |
 | `lamsa render [targets] [--mode dark] [--scale 2] [--out dir] [--animate [n]] [--state s]` | PNGs of top-level frames; `--animate` captures motion as a strip, `--state` forces hover/press/focus/a data-state |
-| `lamsa diff [ref]` | Semantic changes since a git ref and the screens they affect |
-| `lamsa report [--base ref]` | Before/after PNGs of affected screens plus a markdown summary (`.lamsa/report/report.md`) |
+| `lamsa diff [base] [head] [--text] [--open] [--file <path>]` | What changed since a git ref (default HEAD), value by value, and before/after renders of each changed screen with changed layers outlined (`.lamsa/diff/index.html`, plus `report.md` for PRs). `--text` skips rendering |
 | `lamsa selection` | What the user has selected in the editor |
 | `lamsa comments [--open\|--resolved] [--node <id>]` | Comment threads pinned to layers (`node: null` = the layer was deleted) |
 | `lamsa comments add --node <id> [--offset x,y] "<text>"` | Pin a new comment to a layer |
@@ -116,6 +115,6 @@ Use it with `{ "type": "instance", "componentId": "Bt9xQ2mL", "props": { "varian
 
 - Prefer editing over recreating: keep IDs stable so diffs and references stay meaningful.
 - One file per page or board; put shared components in their own file.
-- After every change: `lamsa validate`, then `lamsa render` and look at the image before saying you're done.
+- After every change: `lamsa validate`, then `lamsa render` and look at the image before saying you're done. Before handing back a larger change, run `lamsa diff --text` to check you changed only what you meant to.
 - Never write to `.lamsa/` (editor session state) except via the CLI.
 - Comments live in `designs/comments/` (`commentsDir` in config), one file per thread, committed with the designs. Change them only with `lamsa comments`; replies and resolves show up live in the editor. Replies are signed as you when lamsa can tell you're an agent (Claude Code, or `LAMSA_AGENT_NAME` set); otherwise pass `--author <your name>` so they aren't signed as the user.

@@ -4,9 +4,9 @@ import { checkCommandResult } from "./run.js";
 import { fmtCommand, validateCommand } from "./commands/check.js";
 import { commentAddCommand, commentReopenCommand, commentReplyCommand, commentResolveCommand, commentsCommand } from "./commands/comments.js";
 import { addCommand, deleteCommand, moveCommand, splitCommand } from "./commands/edit.js";
-import { componentsCommand, diffCommand, selectionCommand, tokensCommand, treeCommand } from "./commands/read.js";
+import { componentsCommand, selectionCommand, tokensCommand, treeCommand } from "./commands/read.js";
 import { renderCommand } from "./commands/render.js";
-import { reportCommand } from "./commands/report.js";
+import { diffCommand } from "./commands/diff.js";
 import { initCommand, migrateCommand, openCommand, schemaCommand, skillCommand } from "./commands/setup.js";
 import { createOutput } from "./output.js";
 
@@ -120,19 +120,30 @@ program
   );
 
 program
-  .command("diff [ref]")
-  .description("semantic design changes since a git ref (default HEAD)")
-  .action((ref: string | undefined) => run(() => diffCommand({ out: out(), ref: ref ?? "HEAD" })));
-
-program
-  .command("report")
-  .description("before/after renders and a markdown summary of design changes since a git ref (for PRs)")
-  .option("--base <ref>", "git ref to compare against", "origin/main")
-  .option("--out <dir>", "output directory", ".lamsa/report")
-  .option("--image-base-url <url>", "prefix for image links in report.md")
+  .command("diff [base] [head]")
+  .description("design changes from a git ref (default HEAD) to another ref or the working tree, rendered as before/after images with changed layers outlined")
+  .option("--text", "list the changes only, without rendering")
+  .option("--file <paths...>", "only changes in these design files or globs")
+  .option("--out <dir>", "where the images, index.html and report.md go", ".lamsa/diff")
+  .option("--open", "open the page in the browser")
+  .option("--image-base-url <url>", "prefix for image links in report.md (where the images will be hosted)")
   .option("--scale <n>", "device scale factor", (v) => Number.parseFloat(v), 2)
-  .action((o) =>
-    run(() => reportCommand({ out: out(), base: o.base, outDir: o.out, imageBaseUrl: o.imageBaseUrl, scale: o.scale })),
+  .option("--exit-code", "exit with 1 when there are changes")
+  .action((base: string | undefined, head: string | undefined, o) =>
+    run(() =>
+      diffCommand({
+        out: out(),
+        base: base ?? "HEAD",
+        head,
+        only: o.file,
+        render: !o.text,
+        outDir: o.out,
+        open: o.open === true,
+        imageBaseUrl: o.imageBaseUrl,
+        scale: o.scale,
+        exitCode: o.exitCode === true,
+      }),
+    ),
   );
 
 program
