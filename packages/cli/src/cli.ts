@@ -9,6 +9,7 @@ import { renderCommand } from "./commands/render.js";
 import { diffCommand } from "./commands/diff.js";
 import { initCommand, migrateCommand, openCommand, schemaCommand, skillCommand } from "./commands/setup.js";
 import { createOutput } from "./output.js";
+import { noticeUpdate } from "./update-notice.js";
 import packageJson from "../package.json" with { type: "json" };
 
 const program = new Command()
@@ -18,6 +19,8 @@ const program = new Command()
   .option("--json", "machine-readable output")
   .showHelpAfterError()
   .addHelpText("after", "\nAgent guide: lamsa skill. Editor and docs: https://github.com/Shunseii/lamsa");
+
+program.hook("postAction", () => noticeUpdate({ current: packageJson.version, json: Boolean(program.opts().json) }));
 
 const out = () => createOutput(Boolean(program.opts().json));
 const run = (task: () => Promise<number>) => checkCommandResult(task, Boolean(program.opts().json));

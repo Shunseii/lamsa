@@ -18,11 +18,19 @@ files:
 asarUnpack:
   - node_modules/playwright-core/**
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
-publish: null
+# The app updates from GitHub releases. electron-builder writes latest-mac.yml / latest-linux.yml next to
+# the installers, and the release workflow uploads them; it never publishes on its own (--publish never).
+publish:
+  provider: github
+  owner: Shunseii
+  repo: lamsa
 
 mac:
   target:
     - target: dmg
+      arch: [arm64, x64]
+    # The updater downloads the .zip; people download the .dmg.
+    - target: zip
       arch: [arm64, x64]
   category: public.app-category.graphics-design
   icon: resources/icon-mac.png

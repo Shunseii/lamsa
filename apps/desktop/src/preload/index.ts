@@ -47,6 +47,10 @@ const api: LamsaApi = {
   onAgentEvents: (listener) => listen("agent-events", listener),
   onAgentTerminal: (listener) => listen("agent-terminal", listener),
   onProjectReloaded: (listener) => listen("project-reloaded", listener),
+  updateStatus: () => ipcRenderer.invoke("update-status"),
+  installUpdate: () => ipcRenderer.invoke("install-update"),
+  openUpdateDownload: () => ipcRenderer.invoke("open-update-download"),
+  onUpdateStatus: (listener) => listen("update-status", listener),
 };
 
 contextBridge.exposeInMainWorld("lamsa", api);

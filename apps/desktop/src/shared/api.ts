@@ -136,6 +136,9 @@ export interface FrameSnapshotRequest {
   inherited: Record<string, string>;
 }
 
+/** A newer lamsa release: `available` to download by hand (the .deb), `ready` once downloaded to install on restart. */
+export type UpdateStatus = { state: "none" } | { state: "available"; version: string } | { state: "ready"; version: string };
+
 export interface LamsaApi {
   /** Host of this window's `lamsa-asset://` URLs: each window serves images and fonts from its own project. */
   assetHost: string;
@@ -199,4 +202,10 @@ export interface LamsaApi {
   onAgentEvents(listener: (batch: AgentTurnEvents) => void): () => void;
   onAgentTerminal(listener: (state: AgentTerminalState) => void): () => void;
   onProjectReloaded(listener: (snapshot: ProjectSnapshot) => void): () => void;
+  updateStatus(): Promise<UpdateStatus>;
+  /** Quits and installs a downloaded update. */
+  installUpdate(): Promise<void>;
+  /** Opens the latest release's download page. */
+  openUpdateDownload(): Promise<void>;
+  onUpdateStatus(listener: (status: UpdateStatus) => void): () => void;
 }

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { Canvas } from "./canvas/Canvas";
 import { installShortcuts } from "./lib/commands";
 import { installComments } from "./lib/comments";
+import { installUpdateToasts } from "./lib/updates";
 import { api, useEditor } from "./lib/store";
 import { fitTo } from "./lib/viewport";
 import { baseId } from "./lib/model";
@@ -96,6 +97,7 @@ export function App() {
       }),
       installShortcuts(),
       installComments(),
+      installUpdateToasts(),
     ];
     return () => {
       for (const off of offs) off();

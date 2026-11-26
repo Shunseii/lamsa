@@ -5,7 +5,8 @@ name: release
 #     token is stored: the package's settings on npmjs.com name this repository and this workflow file.
 #     A tag with a suffix (v1.2.3-rc.1) publishes under the `next` dist-tag, so `npm i @lamsa/cli` skips it.
 #   - desktop: builds the editor's installers (Linux .AppImage and .deb; macOS .dmg for Apple silicon
-#     and Intel), launches each build once to check it works, and attaches them to the release.
+#     and Intel), launches each build once to check it works, and attaches them to the release with
+#     the files the app's updater reads (latest-*.yml, the macOS .zip, .blockmap).
 #     macOS builds are signed with the CSC_* secrets and also notarized with the APPLE_API_* ones; with
 #     neither, they're signed ad hoc. The values are kept in 1Password ("lamsa macOS signing").
 #       CSC_LINK          the Developer ID Application certificate as a base64 .p12
@@ -222,6 +223,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          files=( *.AppImage *.deb *.dmg )
+          # latest-*.yml and the .zip/.blockmap files are what the app's updater reads.
+          files=( *.AppImage *.deb *.dmg *.zip *.blockmap latest*.yml )
           echo "Uploading: ${files[*]}"
           gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber

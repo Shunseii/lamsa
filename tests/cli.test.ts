@@ -241,3 +241,16 @@ describe("lamsa CLI activity for the editor", () => {
     expect(readActivityFile(root).agent).toBe("Agent");
   });
 });
+
+describe("update notice", () => {
+  it("only reports a release newer than the running version, ignoring pre-release suffixes", async () => {
+    const { isNewer, updateMessage } = await import("../packages/cli/src/update-notice.js");
+    expect(isNewer({ latest: "0.1.1", current: "0.1.0" })).toBe(true);
+    expect(isNewer({ latest: "0.10.0", current: "0.9.9" })).toBe(true);
+    expect(isNewer({ latest: "1.0.0", current: "0.99.0" })).toBe(true);
+    expect(isNewer({ latest: "0.1.1", current: "0.1.1" })).toBe(false);
+    expect(isNewer({ latest: "0.1.0", current: "0.2.0" })).toBe(false);
+    expect(isNewer({ latest: "0.1.1", current: "0.1.1-rc.3" })).toBe(false);
+    expect(updateMessage({ latest: "0.2.0", current: "0.1.1" })).toContain("npm i -g @lamsa/cli");
+  });
+});

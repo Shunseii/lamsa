@@ -10,6 +10,7 @@ import { CommentsService } from "./comments-service.js";
 import { ProjectService } from "./project-service.js";
 import { createAgent, registerAgentIpc, type WindowAgent } from "./agent/ipc.js";
 import { FrameSnapshots } from "./frame-snapshots.js";
+import { startUpdates } from "./updates.js";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const hidden = Boolean(process.env.LAMSA_HIDDEN);
@@ -368,6 +369,7 @@ if (!gotLock) {
     });
     registerIpc();
     createWindow(launchRequest);
+    startUpdates();
   });
 
   app.on("window-all-closed", () => {

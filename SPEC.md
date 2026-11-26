@@ -106,6 +106,7 @@ Distributed as the `@lamsa/cli` npm package, which installs a `lamsa` command (n
 
 - Every command supports `--json`, uses meaningful exit codes, and reports errors naming the node ID with a suggested fix.
 - Writes are atomic (temp file + rename).
+- At most once a day, a command run in a terminal notes on stderr when a newer `@lamsa/cli` is on npm. It stays silent with `--json`, in CI, when output isn't a terminal (agents, pipes) and with `LAMSA_NO_UPDATE_CHECK`.
 
 Command surface (hybrid):
 
@@ -136,6 +137,8 @@ Electron app with a React frontend (the same frontend can later become a hosted 
 **Why Electron, not Tauri:** Tauri uses the OS webview (WebKitGTK on Linux, WebKit on macOS), while PNG export, PR previews, and most browsers are Chromium. A design tool must render the canvas with the same engine as its exports. Electron also runs the TypeScript core directly in the main process. Accepted cost: bigger download and memory use.
 
 **Releases:** publishing a `v*` GitHub release runs `.github/workflows/release.yml`. It publishes `@lamsa/cli` to npm at that version (trusted publishing, no stored token; a pre-release tag such as `v1.2.0-rc.1` goes to the `next` dist-tag) and builds the editor's installers with electron-builder: a `.dmg` for Apple silicon and Intel, signed with a Developer ID and notarized, and a Linux `.AppImage` and `.deb`. Each build is launched once against the example project before it's attached to the release. The app's executable is `lamsa-desktop` on Linux (the `.deb` links it into `/usr/bin`) and `lamsa.app` on macOS; `lamsa open` finds either, or an AppImage in `~/Applications`.
+
+**Updates:** the app checks GitHub releases at launch and every 6 hours (electron-updater, reading the `latest-*.yml` files each release carries; pre-releases are skipped). The macOS app and the AppImage download a new version in the background and show a sticky toast, "lamsa X is ready" with Restart; otherwise it installs on quit. The `.deb` can't replace itself, so its toast says the version is available and links to the release. Never a modal: an update isn't worth interrupting a design. `LAMSA_NO_UPDATE_CHECK` turns checks off; `LAMSA_UPDATE_FEED` points them at a local folder for testing.
 
 ### File sync
 
