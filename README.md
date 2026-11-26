@@ -68,8 +68,10 @@ MIT licensed.
 | `packages/schema` | `@lamsa/schema`: types and the JSON Schema |
 | `packages/core` | `@lamsa/core`: load, validate, fmt, edit, diff, token adapters |
 | `packages/renderer` | `@lamsa/renderer`: design JSON → DOM/CSS (editor and exports) |
-| `packages/cli` | `lamsa`: the CLI and the agent skill |
+| `packages/cli` | `@lamsa/cli`: the `lamsa` CLI and the agent skill (bundles the packages above when published) |
 | `apps/desktop` | Electron editor (`pnpm desktop`, or `lamsa open` with `lamsa-desktop` on PATH / `LAMSA_DESKTOP_BIN`) |
 | `action` | GitHub Action for PR previews |
 
 `pnpm test` builds everything and runs unit, CLI and desktop end-to-end tests (the editor runs offscreen, no display needed).
+
+To release, publish a GitHub release with a version tag: `gh release create v0.2.0 --title v0.2.0 --notes "…"`. The release workflow publishes `@lamsa/cli` to npm and attaches signed installers for macOS and Linux. `pnpm --filter @lamsa/desktop dist` builds the installers locally into `apps/desktop/release/`.

@@ -11,7 +11,7 @@ inputs:
     description: Git ref to compare against
     default: ${{ github.event.pull_request.base.sha }}
   lamsa-version:
-    description: npm version of the lamsa CLI
+    description: npm version of @lamsa/cli
     default: latest
   previews-branch:
     description: Branch that stores rendered images (created if missing)

@@ -56,7 +56,9 @@ Out of scope: pen tool, boolean operations, anything CSS can't render.
 ### Styles
 
 - CSS-native property names everywhere, including the properties panel (`width: auto`, `flex: 1`, not "Hug"/"Fill").
-- A subset of CSS: no selectors, no cascade, no `:hover`. Interactive states are component variants.
+- A node's `style` holds plain CSS properties: no selectors, no cascade.
+- A node's raw `css` adds what `style` can't express: states (`&:hover`, `&:active`, `&:focus-visible`, `&[data-state=loading]`) and transitions, e.g. `transition: scale 150ms; &:hover { scale: 1.02 }`. The editor's preview and `lamsa render` can force a state without a pointer.
+- A file's top-level `css` holds only `@keyframes` and `::view-transition-*` rules (page transitions between screens). Shared custom properties such as motion tokens belong in the app's token CSS, which every render loads.
 - Unitless numbers mean px.
 
 ### Text
@@ -98,7 +100,7 @@ Comments are part of the design conversation, so they are plain files in the rep
 
 ## CLI (`lamsa`)
 
-Distributed as the `lamsa` npm package with a `lamsa` binary.
+Distributed as the `@lamsa/cli` npm package, which installs a `lamsa` command (npm refuses the unscoped name `lamsa` as too close to `ramda`). Install it globally (`npm i -g @lamsa/cli`) or pin it per repo (`pnpm add -D @lamsa/cli`); without either, `npx @lamsa/cli` runs it.
 
 **Agent interface:** no MCP. A documented CLI plus agent skills. `lamsa init` installs the skill and adds a section to `AGENTS.md`.
 
@@ -111,17 +113,17 @@ Command surface (hybrid):
 |---|---|
 | Error-prone operations | `add --tree`, `move`, `delete`, `split` |
 | Verification | `validate`, `fmt` (assigns missing IDs, sorts keys; `--fix` removes orphans), `render` |
-| Read views | `tree`, `diff`, `components`, `tokens`, `selection` |
+| Read views | `tree`, `components`, `tokens`, `selection` |
 | Setup / upkeep | `init`, `migrate` |
 | Show the user | `open` (optional; launches or focuses the desktop app) |
-| Review | `report` (before/after PNGs of affected screens + markdown summary; the GitHub Action wraps it) |
+| Review | `diff [base] [head]` (changed screens rendered before and after with changed layers outlined, a review page and a PR report; `--text` for the list only; the GitHub Action wraps it) |
 | Comments | `comments [--open\|--resolved] [--node <id>]`, `comments add --node <id> [--offset x,y] "<text>"`, `comments reply <id> "<text>"`, `comments resolve <id> [--reply "<text>"]`, `comments reopen <id>` (`comment` is an alias) |
 
 The agent guide (`lamsa skill`) tells agents to check open comments before starting, address them, and resolve each with a one-line reply saying what they did (or reply and leave it open when unsure).
 
 Simple property tweaks are raw JSON edits; raw edits are first-class.
 
-**Rendering:** all PNG export goes through the CLI renderer (playwright-core with system Chrome, or a one-time Chromium download) so output is identical everywhere.
+**Rendering:** all PNG export, from the CLI and from the editor, goes through the same renderer (playwright-core with system Chrome, or a one-time Chromium download) so output is identical everywhere.
 
 **Selection:** the desktop app writes a gitignored `.lamsa/session.json` with the current selection; `lamsa selection` reads it if present. The CLI never requires the app to be open or closed.
 
@@ -131,7 +133,9 @@ Simple property tweaks are raw JSON edits; raw edits are first-class.
 
 Electron app with a React frontend (the same frontend can later become a hosted editor).
 
-**Why Electron, not Tauri:** Tauri uses the OS webview (WebKitGTK on Linux, WebKit on macOS), while PNG export, PR previews, and most browsers are Chromium. A design tool must render the canvas with the same engine as its exports. Electron also runs the TypeScript core directly in the main process and gives a proven terminal stack (`node-pty` + xterm.js). Accepted cost: bigger download and memory use.
+**Why Electron, not Tauri:** Tauri uses the OS webview (WebKitGTK on Linux, WebKit on macOS), while PNG export, PR previews, and most browsers are Chromium. A design tool must render the canvas with the same engine as its exports. Electron also runs the TypeScript core directly in the main process. Accepted cost: bigger download and memory use.
+
+**Releases:** publishing a `v*` GitHub release runs `.github/workflows/release.yml`. It publishes `@lamsa/cli` to npm at that version (trusted publishing, no stored token; a pre-release tag such as `v1.2.0-rc.1` goes to the `next` dist-tag) and builds the editor's installers with electron-builder: a `.dmg` for Apple silicon and Intel, signed with a Developer ID and notarized, and a Linux `.AppImage` and `.deb`. Each build is launched once against the example project before it's attached to the release. The app's executable is `lamsa-desktop` on Linux (the `.deb` links it into `/usr/bin`) and `lamsa.app` on macOS; `lamsa open` finds either, or an AppImage in `~/Applications`.
 
 ### File sync
 
@@ -183,8 +187,8 @@ A pnpm monorepo, all TypeScript, so the CLI and the editor share one core and va
 | `@lamsa/schema` | Types and the published JSON Schema |
 | `@lamsa/core` | Parse, `fmt`, validate, tree/diff, fractional indexing, token adapters |
 | `@lamsa/renderer` | Design JSON → DOM/CSS; used by the editor canvas and PNG export |
-| `lamsa` | The CLI; playwright-core for rendering |
-| `apps/desktop` | Electron + React + Vite editor |
+| `@lamsa/cli` | The `lamsa` CLI and agent skill; playwright-core for rendering. The only package published to npm: it bundles the three above |
+| `apps/desktop` | Electron + React + Vite editor, packaged with electron-builder |
 
 ## Build phases
 

@@ -16,7 +16,8 @@ const program = new Command()
   .description("Design files for apps, driven by your own coding agent. Every command is non-interactive.")
   .version(packageJson.version)
   .option("--json", "machine-readable output")
-  .showHelpAfterError();
+  .showHelpAfterError()
+  .addHelpText("after", "\nAgent guide: lamsa skill. Editor and docs: https://github.com/Shunseii/lamsa");
 
 const out = () => createOutput(Boolean(program.opts().json));
 const run = (task: () => Promise<number>) => checkCommandResult(task, Boolean(program.opts().json));
@@ -205,6 +206,10 @@ program
   .command("open [file]")
   .description("show a design in the desktop editor (optional; nothing else needs it)")
   .option("--select <ids>", "nodes to select: comma-separated IDs; repeatable", (value: string, previous: string[] = []) => [...previous, ...value.split(",")])
+  .addHelpText(
+    "after",
+    "\nFinds the editor as LAMSA_DESKTOP_BIN, lamsa-desktop on PATH (the Linux .deb), lamsa.app in /Applications\nor ~/Applications, or the newest lamsa AppImage in ~/Applications or ~/.local/bin.\nDownload it from https://github.com/Shunseii/lamsa/releases/latest",
+  )
   .action((file: string | undefined, o: { select?: string[] }) => run(() => openCommand({ out: out(), file, select: o.select })));
 
 program

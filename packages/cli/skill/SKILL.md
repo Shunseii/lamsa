@@ -7,6 +7,8 @@ description: Design app screens and components as lamsa design files (*.lamsa.js
 
 lamsa designs are plain JSON files in this repo (`*.lamsa.json`, see `lamsa.config.json` for where). You edit them directly or with the `lamsa` CLI, check them with `lamsa validate`, and look at them with `lamsa render`. Nothing needs a person to open an app: every step below runs headless.
 
+If `lamsa` isn't on PATH, run it from the repo's own install (`pnpm exec lamsa`, `npx lamsa`) or as `npx @lamsa/cli`. Never `npx lamsa` outside a repo that has it installed: the npm package is `@lamsa/cli`, not `lamsa`.
+
 A design is a **spec**, not code. To build a designed screen, read its JSON and its PNG, then implement it with this repo's own framework, components, and tokens.
 
 ## The loop

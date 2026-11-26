@@ -41,6 +41,7 @@ UI designs live in \`*.lamsa.json\` files (see \`lamsa.config.json\`). They are 
 - The user's selection in the editor: \`lamsa selection --json\`.
 - Comments people pinned to layers: \`lamsa comments --open --json\`; address each, then \`lamsa comments resolve <id> --reply "<what you did>"\`.
 - Every command takes \`--json\`. Full guide: \`lamsa skill\`.
+- No \`lamsa\` on PATH? Use the repo's install (\`pnpm exec lamsa\`) or \`npx @lamsa/cli\`; the npm package isn't called \`lamsa\`.
 ${MARK_END}
 `;
 
