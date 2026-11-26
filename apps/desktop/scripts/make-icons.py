@@ -26,3 +26,9 @@ def icon(size: int) -> Image.Image:
 OUT.mkdir(parents=True, exist_ok=True)
 for size in (16, 32, 48, 64, 128, 256, 512):
     icon(size).save(OUT / f"{size}.png")
+
+# macOS draws app icons inside Apple's icon grid: the shape is 824px of a 1024px canvas, centred,
+# so lamsa sits the same size as other apps in the Dock. electron-builder turns this into an .icns.
+mac = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+mac.paste(icon(824), (100, 100))
+mac.save(OUT.parent / "icon-mac.png")

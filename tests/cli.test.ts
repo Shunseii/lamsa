@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -105,6 +105,30 @@ describe("lamsa CLI (agent loop, no editor)", () => {
     const missing = lamsaWith({ cwd: root, args: ["open", "--select", `${frameId},nope1234`], env });
     expect(missing.code).not.toBe(0);
     expect(JSON.stringify(missing.json)).toContain("nope1234");
+  });
+
+  it.runIf(process.platform === "linux")("opens the newest downloaded AppImage when lamsa-desktop isn't on PATH, and says where to get the app when there is none", () => {
+    const root = tempRepo({ "app/globals.css": GLOBALS_CSS });
+    lamsa(root, "init", "--yes");
+    const home = join(root, "home");
+    const applications = join(home, "Applications");
+    mkdirSync(applications, { recursive: true });
+    const argsFile = join(root, "desktop-args.txt");
+    for (const version of ["0.9.0", "0.10.0"]) {
+      writeFileSync(join(applications, `lamsa-${version}-linux-x86_64.AppImage`), `#!/bin/sh\necho "${version} $@" > "${argsFile}"\n`, { mode: 0o755 });
+    }
+    // An empty PATH, so a lamsa-desktop installed on this machine isn't found first.
+    const { LAMSA_DESKTOP_BIN: _bin, ...env } = process.env;
+    const open = () => spawnSync(process.execPath, [CLI, "--json", "open"], { cwd: root, encoding: "utf8", env: { ...env, HOME: home, PATH: join(root, "no-bin") } });
+
+    const opened = open();
+    expect(opened.status).toBe(0);
+    expect(JSON.parse(opened.stdout).app).toBe(join(applications, "lamsa-0.10.0-linux-x86_64.AppImage"));
+
+    rmSync(applications, { recursive: true });
+    const none = open();
+    expect(none.status).not.toBe(0);
+    expect(none.stdout + none.stderr).toContain("github.com/Shunseii/lamsa/releases");
   });
 });
 

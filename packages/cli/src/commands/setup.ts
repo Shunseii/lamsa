@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -158,6 +159,32 @@ function findOnPath(command: string): string | undefined {
   return undefined;
 }
 
+const RELEASES = "https://github.com/Shunseii/lamsa/releases/latest";
+
+/** The newest lamsa AppImage in a folder, by file name (they carry the version). */
+function findAppImage(dir: string): string | undefined {
+  if (!existsSync(dir)) return undefined;
+  const images = readdirSync(dir).filter((name) => /^lamsa-.*\.AppImage$/.test(name));
+  const newest = images.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1);
+  return newest ? join(dir, newest) : undefined;
+}
+
+/** Where the desktop app is: LAMSA_DESKTOP_BIN, `lamsa-desktop` on PATH (the .deb and source installs), the macOS app, or an AppImage. */
+export function findDesktopApp(): string | undefined {
+  if (process.env.LAMSA_DESKTOP_BIN) return process.env.LAMSA_DESKTOP_BIN;
+  const onPath = findOnPath("lamsa-desktop");
+  if (onPath) return onPath;
+  if (process.platform === "darwin") {
+    return [join("/Applications"), join(homedir(), "Applications")]
+      .map((dir) => join(dir, "lamsa.app", "Contents", "MacOS", "lamsa-desktop"))
+      .find((path) => existsSync(path));
+  }
+  if (process.platform === "linux") {
+    return [join(homedir(), "Applications"), join(homedir(), ".local", "bin")].map(findAppImage).find(Boolean);
+  }
+  return undefined;
+}
+
 export async function openCommand({
   out,
   file,
@@ -170,12 +197,12 @@ export async function openCommand({
   const root = resolveRoot();
   const ids = [...new Set((select ?? []).map((id) => id.trim()).filter(Boolean))];
   if (ids.length) await checkNodesExist({ root, ids });
-  const app = process.env.LAMSA_DESKTOP_BIN ?? findOnPath("lamsa-desktop");
+  const app = findDesktopApp();
   if (!app) {
     throw new CliError(
       "the lamsa desktop app is not installed",
       ExitCode.notFound,
-      "install it, or set LAMSA_DESKTOP_BIN; everything else works without it (use `lamsa render` to look at designs)",
+      `download it from ${RELEASES}, or set LAMSA_DESKTOP_BIN; everything else works without it (use \`lamsa render\` to look at designs)`,
     );
   }
   const args = [`--root=${root}`];

@@ -108,8 +108,10 @@ function installChromium(log: (message: string) => void) {
   }
   log("lamsa: downloading Chromium for rendering (one time)…");
   const cli = join(dirname(require.resolve("playwright-core/package.json")), "cli.js");
+  // Inside the desktop app, process.execPath is Electron; this makes it run the script as Node.
   execFileSync(process.execPath, [cli, "install", "chromium-headless-shell"], {
     stdio: ["ignore", "ignore", "inherit"],
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
   });
 }
 

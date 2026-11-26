@@ -1,0 +1,56 @@
+# Installers for the lamsa editor. `pnpm --filter @lamsa/desktop dist` builds them into release/.
+#
+# electron-vite bundles everything into out/ except the packages in `dependencies`, which are found on
+# disk at run time: playwright-core (PNG export), lucide-static (icon SVGs) and tailwindcss (Tailwind's
+# default theme for token reading). Only those ship in the app's node_modules.
+appId: dev.lamsa.app
+productName: lamsa
+# lamsa-desktop, not lamsa: the CLI owns the `lamsa` command. The .deb links /usr/bin/lamsa-desktop,
+# which `lamsa open` looks for on PATH.
+executableName: lamsa-desktop
+copyright: Copyright © lamsa contributors
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - resources/**
+  - package.json
+# Exporting PNGs can download Chromium once; playwright-core's installer runs as a plain Node script,
+# which needs real files on disk, not the asar archive.
+asarUnpack:
+  - node_modules/playwright-core/**
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+publish: null
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  category: public.app-category.graphics-design
+  icon: resources/icon-mac.png
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Notarizes when the APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER secrets are set; signing
+  # uses CSC_LINK and CSC_KEY_PASSWORD. Without them the build is unsigned.
+  notarize: true
+dmg:
+  title: ${productName} ${version}
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  category: Graphics
+  icon: resources/icons/512.png
+  maintainer: lamsa <lamsa@users.noreply.github.com>
+  synopsis: Design editor for app UI, driven by your coding agent
+  description: lamsa is a local-first design tool. Designs are JSON files in your repo; your coding agent does the work, you add the touch.
+  desktop:
+    entry:
+      Name: lamsa
+      GenericName: Design editor
+      StartupWMClass: lamsa

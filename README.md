@@ -23,6 +23,8 @@ pnpm add -D @lamsa/cli   # for a team: pins the version in your repo, so CI and 
 
 `lamsa render` uses your installed Chrome, or downloads Chromium once on first use.
 
+The desktop editor is on the [releases page](https://github.com/Shunseii/lamsa/releases/latest): a `.dmg` for macOS (Apple silicon or Intel), and an `.AppImage` or `.deb` for Linux. `lamsa open` finds it in `/Applications`, as `lamsa-desktop` on your PATH (the `.deb` puts it there), or as an AppImage in `~/Applications`.
+
 ```sh
 lamsa init --agent claude --yes       # config, agent skill, AGENTS.md section
 lamsa tokens                          # what your app's CSS defines
