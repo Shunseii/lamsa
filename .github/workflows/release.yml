@@ -5,7 +5,7 @@ name: release
 #     token is stored: the package's settings on npmjs.com name this repository and this workflow file.
 #     A tag with a suffix (v1.2.3-rc.1) publishes under the `next` dist-tag, so `npm i @lamsa/cli` skips it.
 #   - desktop: builds the editor's installers (Linux .AppImage and .deb; macOS .dmg for Apple silicon
-#     and Intel), launches each build once to check it works, and attaches them to the release with
+#     and Intel; an unsigned Windows .exe), launches each build once to check it works, and attaches them to the release with
 #     the files the app's updater reads (latest-*.yml, the macOS .zip, .blockmap).
 #     macOS builds are signed with the CSC_* secrets and also notarized with the APPLE_API_* ones; with
 #     neither, they're signed ad hoc. The values are kept in 1Password ("lamsa macOS signing").
@@ -114,7 +114,14 @@ jobs:
           - os: macos-latest
             platform: --mac
             executable: apps/desktop/release/mac-arm64/lamsa.app/Contents/MacOS/lamsa
+          # Unsigned: SmartScreen warns on first run until the app is signed.
+          - os: windows-latest
+            platform: --win
+            executable: apps/desktop/release/win-unpacked/lamsa.exe
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: write
     env:
@@ -173,6 +180,8 @@ jobs:
         run: |
           # An unset secret arrives as an empty string, which electron-builder reads as a file path.
           [ -n "$CSC_LINK" ] || unset CSC_LINK CSC_KEY_PASSWORD
+          # The certificate is Apple's; it must not reach the Windows signer.
+          [ "${{ matrix.platform }}" = "--mac" ] || unset CSC_LINK CSC_KEY_PASSWORD
           [ -n "$APPLE_API_KEY_ID" ] || unset APPLE_API_KEY_ID APPLE_API_ISSUER
           extra=""
           if [ "${{ matrix.platform }}" = "--mac" ]; then
@@ -224,6 +233,6 @@ jobs:
         run: |
           shopt -s nullglob
           # latest-*.yml and the .zip/.blockmap files are what the app's updater reads.
-          files=( *.AppImage *.deb *.dmg *.zip *.blockmap latest*.yml )
+          files=( *.AppImage *.deb *.dmg *.exe *.zip *.blockmap latest*.yml )
           echo "Uploading: ${files[*]}"
           gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber

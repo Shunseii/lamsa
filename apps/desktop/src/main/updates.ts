@@ -5,8 +5,8 @@ import type { UpdateStatus } from "../shared/api.js";
 const RELEASES_PAGE = "https://github.com/Shunseii/lamsa/releases/latest";
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
-/** The macOS app and the AppImage can replace themselves; the .deb can only point to the download. */
-const canInstallItself = () => process.platform === "darwin" || Boolean(process.env.APPIMAGE);
+/** The macOS app, the Windows install and the AppImage can replace themselves; the .deb can only point to the download. */
+const canInstallItself = () => process.platform === "darwin" || process.platform === "win32" || Boolean(process.env.APPIMAGE);
 
 let status: UpdateStatus = { state: "none" };
 

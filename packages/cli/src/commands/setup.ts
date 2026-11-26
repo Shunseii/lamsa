@@ -170,7 +170,7 @@ function findAppImage(dir: string): string | undefined {
   return newest ? join(dir, newest) : undefined;
 }
 
-/** Where the desktop app is: LAMSA_DESKTOP_BIN, `lamsa-desktop` on PATH (the .deb and source installs), the macOS app, or an AppImage. */
+/** Where the desktop app is: LAMSA_DESKTOP_BIN, `lamsa-desktop` on PATH (the .deb and source installs), the macOS app, the Windows install, or an AppImage. */
 export function findDesktopApp(): string | undefined {
   if (process.env.LAMSA_DESKTOP_BIN) return process.env.LAMSA_DESKTOP_BIN;
   const onPath = findOnPath("lamsa-desktop");
@@ -179,6 +179,11 @@ export function findDesktopApp(): string | undefined {
     return [join("/Applications"), join(homedir(), "Applications")]
       .map((dir) => join(dir, "lamsa.app", "Contents", "MacOS", "lamsa"))
       .find((path) => existsSync(path));
+  }
+  if (process.platform === "win32") {
+    const programs = join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "Programs");
+    const exe = join(programs, "lamsa", "lamsa.exe");
+    return existsSync(exe) ? exe : undefined;
   }
   if (process.platform === "linux") {
     return [join(homedir(), "Applications"), join(homedir(), ".local", "bin")].map(findAppImage).find(Boolean);

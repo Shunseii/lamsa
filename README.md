@@ -23,7 +23,7 @@ pnpm add -D @lamsa/cli   # for a team: pins the version in your repo, so CI and 
 
 `lamsa render` uses your installed Chrome, or downloads Chromium once on first use.
 
-The desktop editor is on the [releases page](https://github.com/Shunseii/lamsa/releases/latest): a `.dmg` for macOS (Apple silicon or Intel), and an `.AppImage` or `.deb` for Linux. `lamsa open` finds it in `/Applications`, as `lamsa-desktop` on your PATH (the `.deb` puts it there), or as an AppImage in `~/Applications`.
+The desktop editor is on the [releases page](https://github.com/Shunseii/lamsa/releases/latest): a `.dmg` for macOS (Apple silicon or Intel), an `.exe` installer for Windows, and an `.AppImage` or `.deb` for Linux. The Windows installer isn't signed yet, so SmartScreen warns the first time: choose "More info", then "Run anyway". The editor updates itself after that. `lamsa open` finds it in `/Applications`, in `%LOCALAPPDATA%\Programs\lamsa`, as `lamsa-desktop` on your PATH (the `.deb` puts it there), or as an AppImage in `~/Applications`.
 
 ```sh
 lamsa init --agent claude --yes       # config, agent skill, AGENTS.md section
@@ -74,4 +74,4 @@ MIT licensed.
 
 `pnpm test` builds everything and runs unit, CLI and desktop end-to-end tests (the editor runs offscreen, no display needed).
 
-To release, publish a GitHub release with a version tag: `gh release create v0.2.0 --title v0.2.0 --notes "…"`. The release workflow publishes `@lamsa/cli` to npm and attaches signed installers for macOS and Linux. `pnpm --filter @lamsa/desktop dist` builds the installers locally into `apps/desktop/release/`.
+To release, publish a GitHub release with a version tag: `gh release create v0.2.0 --title v0.2.0 --notes "…"`. The release workflow publishes `@lamsa/cli` to npm and attaches installers for macOS (signed and notarized), Windows (unsigned) and Linux. `pnpm --filter @lamsa/desktop dist` builds the installers locally into `apps/desktop/release/`.

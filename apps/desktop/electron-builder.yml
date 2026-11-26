@@ -43,6 +43,20 @@ mac:
 dmg:
   title: ${productName} ${version}
 
+win:
+  # Unsigned for now: SmartScreen warns on first run ("More info" → "Run anyway"). Azure Artifact
+  # Signing can be added later with secrets, like macOS signing.
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icons/256.png
+nsis:
+  # Per-user install into %LOCALAPPDATA%\Programs\lamsa (no admin prompt), which `lamsa open` looks
+  # for, and which the updater can replace without elevation.
+  oneClick: true
+  perMachine: false
+  shortcutName: lamsa
+
 linux:
   # lamsa-desktop, not lamsa: the CLI owns the `lamsa` command. The .deb links /usr/bin/lamsa-desktop,
   # which `lamsa open` looks for on PATH. (Set here only: on macOS it would also rename lamsa.app.)

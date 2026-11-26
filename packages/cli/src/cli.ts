@@ -211,7 +211,7 @@ program
   .option("--select <ids>", "nodes to select: comma-separated IDs; repeatable", (value: string, previous: string[] = []) => [...previous, ...value.split(",")])
   .addHelpText(
     "after",
-    "\nFinds the editor as LAMSA_DESKTOP_BIN, lamsa-desktop on PATH (the Linux .deb), lamsa.app in /Applications\nor ~/Applications, or the newest lamsa AppImage in ~/Applications or ~/.local/bin.\nDownload it from https://github.com/Shunseii/lamsa/releases/latest",
+    "\nFinds the editor as LAMSA_DESKTOP_BIN, lamsa-desktop on PATH (the Linux .deb), lamsa.app in /Applications\nor ~/Applications, %LOCALAPPDATA%\\Programs\\lamsa\\lamsa.exe, or the newest lamsa AppImage in ~/Applications\nor ~/.local/bin.\nDownload it from https://github.com/Shunseii/lamsa/releases/latest",
   )
   .action((file: string | undefined, o: { select?: string[] }) => run(() => openCommand({ out: out(), file, select: o.select })));
 
