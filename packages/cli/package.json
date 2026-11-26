@@ -1,8 +1,11 @@
 {
-  "name": "lamsa",
+  "name": "@lamsa/cli",
   "version": "0.1.0",
   "description": "Local-first design files for apps, driven by your own coding agent",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "design",
     "design-tool",
@@ -27,7 +30,7 @@
     "node": ">=22"
   },
   "bin": {
-    "lamsa": "./dist/cli.js"
+    "lamsa": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

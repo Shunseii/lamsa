@@ -311,7 +311,7 @@ function registerIpc() {
   handle("render", async (context, ids: string[], mode?: "light" | "dark") => {
     const root = context.service.root;
     if (!root) return [];
-    const { openWorkspace, renderFrames } = await import("lamsa");
+    const { openWorkspace, renderFrames } = await import("@lamsa/cli");
     const workspace = await openWorkspace(root);
     const frames = await renderFrames({
       workspace,

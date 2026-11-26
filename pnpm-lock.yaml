@@ -56,6 +56,9 @@ importers:
       '@codemirror/view':
         specifier: ^6.43.15
         version: 6.43.15
+      '@lamsa/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
       '@lamsa/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -77,9 +80,6 @@ importers:
       fractional-indexing:
         specifier: ^3.2.0
         version: 3.4.0
-      lamsa:
-        specifier: workspace:*
-        version: link:../../packages/cli
       lucide-react:
         specifier: ^0.469.0
         version: 0.469.0(react@19.3.1)

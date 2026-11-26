@@ -17,8 +17,8 @@ lamsa (لمسة, "a touch") is an open-source, local-first design tool for devel
 The CLI needs Node 22 or later.
 
 ```sh
-npm i -g lamsa        # for yourself
-pnpm add -D lamsa     # for a team: pins the version in your repo, so CI and every agent use it
+npm i -g @lamsa/cli      # for yourself
+pnpm add -D @lamsa/cli   # for a team: pins the version in your repo, so CI and every agent use it
 ```
 
 `lamsa render` uses your installed Chrome, or downloads Chromium once on first use.

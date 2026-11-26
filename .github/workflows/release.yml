@@ -1,11 +1,11 @@
 name: release
 
-# Publishing a GitHub release with a version tag (v1.2.3) publishes the `lamsa` CLI to npm at that
+# Publishing a GitHub release with a version tag (v1.2.3) publishes the CLI, `@lamsa/cli`, to npm at that
 # version. npm trusted publishing authenticates the job, so no npm token is stored: the package's
 # settings on npmjs.com name this repository and this workflow file.
 #
 # Create the release with: gh release create v1.2.3 --title "v1.2.3" --notes "..."
-# A tag with a suffix (v1.2.3-rc.1) publishes under the `next` dist-tag, so `npm i lamsa` skips it.
+# A tag with a suffix (v1.2.3-rc.1) publishes under the `next` dist-tag, so `npm i @lamsa/cli` skips it.
 on:
   release:
     types: [published]
@@ -74,7 +74,7 @@ jobs:
           npm pack --pack-destination "$RUNNER_TEMP"
           mkdir "$RUNNER_TEMP/try" && cd "$RUNNER_TEMP/try"
           npm init -y > /dev/null
-          npm install "$RUNNER_TEMP"/lamsa-*.tgz
+          npm install "$RUNNER_TEMP"/lamsa-cli-*.tgz
           test "$(npx lamsa --version)" = "${{ steps.version.outputs.version }}"
 
       # Skipping a version already on npm makes a re-run, or a release for a hand-published version, safe.
@@ -83,8 +83,8 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if npm view "lamsa@$VERSION" version > /dev/null 2>&1; then
-            echo "::notice::lamsa@$VERSION is already on npm; nothing to publish"
+          if npm view "@lamsa/cli@$VERSION" version > /dev/null 2>&1; then
+            echo "::notice::@lamsa/cli@$VERSION is already on npm; nothing to publish"
             exit 0
           fi
           npm publish --access public --tag "${{ steps.version.outputs.dist_tag }}"
