@@ -112,7 +112,7 @@ jobs:
           # Apple silicon runner; it builds the Intel .dmg too (lamsa has no native modules).
           - os: macos-latest
             platform: --mac
-            executable: apps/desktop/release/mac-arm64/lamsa.app/Contents/MacOS/lamsa-desktop
+            executable: apps/desktop/release/mac-arm64/lamsa.app/Contents/MacOS/lamsa
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write

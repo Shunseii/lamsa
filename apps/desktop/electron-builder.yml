@@ -5,9 +5,6 @@
 # default theme for token reading). Only those ship in the app's node_modules.
 appId: dev.lamsa.app
 productName: lamsa
-# lamsa-desktop, not lamsa: the CLI owns the `lamsa` command. The .deb links /usr/bin/lamsa-desktop,
-# which `lamsa open` looks for on PATH.
-executableName: lamsa-desktop
 copyright: Copyright © lamsa contributors
 directories:
   output: release
@@ -39,6 +36,9 @@ dmg:
   title: ${productName} ${version}
 
 linux:
+  # lamsa-desktop, not lamsa: the CLI owns the `lamsa` command. The .deb links /usr/bin/lamsa-desktop,
+  # which `lamsa open` looks for on PATH. (Set here only: on macOS it would also rename lamsa.app.)
+  executableName: lamsa-desktop
   target:
     - target: AppImage
       arch: [x64]

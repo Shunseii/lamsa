@@ -176,7 +176,7 @@ export function findDesktopApp(): string | undefined {
   if (onPath) return onPath;
   if (process.platform === "darwin") {
     return [join("/Applications"), join(homedir(), "Applications")]
-      .map((dir) => join(dir, "lamsa.app", "Contents", "MacOS", "lamsa-desktop"))
+      .map((dir) => join(dir, "lamsa.app", "Contents", "MacOS", "lamsa"))
       .find((path) => existsSync(path));
   }
   if (process.platform === "linux") {
