@@ -162,6 +162,9 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
+          # An unset secret arrives as an empty string, which electron-builder reads as a file path.
+          [ -n "$CSC_LINK" ] || unset CSC_LINK CSC_KEY_PASSWORD
+          [ -n "$APPLE_API_KEY_ID" ] || unset APPLE_API_KEY_ID APPLE_API_ISSUER
           extra=""
           if [ "${{ matrix.platform }}" = "--mac" ]; then
             if [ "$SIGNED" = true ]; then
@@ -182,8 +185,15 @@ jobs:
           spctl --assess --type execute --verbose=2 "$app"
           xcrun stapler validate "$app"
 
+      # Linux runners have no display, so the Linux build runs under a virtual one.
       - name: Launch the build once
-        run: node apps/desktop/scripts/smoke-packaged.mjs "${{ matrix.executable }}" "$RUNNER_TEMP/smoke.png"
+        run: |
+          if [ "${{ matrix.platform }}" = "--linux" ]; then
+            sudo apt-get install -y --no-install-recommends xvfb > /dev/null
+            xvfb-run --auto-servernum node apps/desktop/scripts/smoke-packaged.mjs "${{ matrix.executable }}" "$RUNNER_TEMP/smoke.png"
+          else
+            node apps/desktop/scripts/smoke-packaged.mjs "${{ matrix.executable }}" "$RUNNER_TEMP/smoke.png"
+          fi
 
       - name: Keep the smoke-test screenshot
         if: always()
