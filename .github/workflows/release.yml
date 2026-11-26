@@ -6,7 +6,8 @@ name: release
 #     A tag with a suffix (v1.2.3-rc.1) publishes under the `next` dist-tag, so `npm i @lamsa/cli` skips it.
 #   - desktop: builds the editor's installers (Linux .AppImage and .deb; macOS .dmg for Apple silicon
 #     and Intel), launches each build once to check it works, and attaches them to the release.
-#     macOS builds are signed and notarized when these repository secrets are set, unsigned otherwise:
+#     macOS builds are signed with the CSC_* secrets and also notarized with the APPLE_API_* ones; with
+#     neither, they're signed ad hoc. The values are kept in 1Password ("lamsa macOS signing").
 #       CSC_LINK          the Developer ID Application certificate as a base64 .p12
 #       CSC_KEY_PASSWORD  its password
 #       APPLE_API_KEY     the App Store Connect API key (.p8 file contents)
@@ -137,21 +138,28 @@ jobs:
 
       - run: pnpm -r --filter "./packages/*" build
 
+      # Signing needs the certificate (CSC_*); notarization also needs the App Store Connect API key.
       - name: Set up macOS signing
         if: matrix.platform == '--mac'
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         run: |
+          if [ -n "$CSC_LINK" ]; then
+            echo "SIGNED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No signing certificate: the macOS build is signed ad hoc, and Gatekeeper blocks it when downloaded in a browser."
+            echo "SIGNED=false" >> "$GITHUB_ENV"
+          fi
           if [ -n "$CSC_LINK" ] && [ -n "$APPLE_API_KEY" ]; then
             # electron-builder reads APPLE_API_KEY as a path to the .p8 file.
             key="$RUNNER_TEMP/apple-api-key.p8"
             printf '%s' "$APPLE_API_KEY" > "$key"
             echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
-            echo "SIGNED=true" >> "$GITHUB_ENV"
+            echo "NOTARIZED=true" >> "$GITHUB_ENV"
           else
-            echo "::warning::No signing secrets: the macOS build is unsigned, and Gatekeeper blocks it when downloaded in a browser."
-            echo "SIGNED=false" >> "$GITHUB_ENV"
+            [ -n "$CSC_LINK" ] && echo "::warning::No App Store Connect API key: the macOS build is signed but not notarized, so Gatekeeper still warns when it's downloaded in a browser."
+            echo "NOTARIZED=false" >> "$GITHUB_ENV"
           fi
 
       - name: Build installers
@@ -167,11 +175,13 @@ jobs:
           [ -n "$APPLE_API_KEY_ID" ] || unset APPLE_API_KEY_ID APPLE_API_ISSUER
           extra=""
           if [ "${{ matrix.platform }}" = "--mac" ]; then
-            if [ "$SIGNED" = true ]; then
-              export APPLE_API_KEY="$APPLE_API_KEY_PATH"
-            else
+            if [ "$SIGNED" != true ]; then
               # Apple silicon won't run an app with a broken signature, so sign it ad hoc.
               extra="-c.mac.identity=- -c.mac.notarize=false"
+            elif [ "$NOTARIZED" = true ]; then
+              export APPLE_API_KEY="$APPLE_API_KEY_PATH"
+            else
+              extra="-c.mac.notarize=false"
             fi
           fi
           pnpm exec electron-vite build
@@ -182,8 +192,11 @@ jobs:
         run: |
           app=apps/desktop/release/mac-arm64/lamsa.app
           codesign --verify --deep --strict --verbose=2 "$app"
-          spctl --assess --type execute --verbose=2 "$app"
-          xcrun stapler validate "$app"
+          codesign --display --verbose=2 "$app" 2>&1 | grep -E "^Authority=Developer ID Application"
+          if [ "$NOTARIZED" = true ]; then
+            spctl --assess --type execute --verbose=2 "$app"
+            xcrun stapler validate "$app"
+          fi
 
       # Linux runners have no display, so the Linux build runs under a virtual one.
       - name: Launch the build once
