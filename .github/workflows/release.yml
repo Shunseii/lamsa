@@ -1,0 +1,90 @@
+name: release
+
+# Publishing a GitHub release with a version tag (v1.2.3) publishes the `lamsa` CLI to npm at that
+# version. npm trusted publishing authenticates the job, so no npm token is stored: the package's
+# settings on npmjs.com name this repository and this workflow file.
+#
+# Create the release with: gh release create v1.2.3 --title "v1.2.3" --notes "..."
+# A tag with a suffix (v1.2.3-rc.1) publishes under the `next` dist-tag, so `npm i lamsa` skips it.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  npm:
+    if: startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or later; Node 22 ships npm 10.
+      - run: npm install -g npm@latest
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Read the version from the tag
+        id: version
+        run: |
+          VERSION="${TAG#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Tag $TAG is not v<major>.<minor>.<patch>[-prerelease]"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then echo "dist_tag=next" >> "$GITHUB_OUTPUT"; else echo "dist_tag=latest" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Stamp the version
+        working-directory: packages/cli
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - run: pnpm build
+
+      - run: pnpm lint
+
+      - run: pnpm test:unit
+
+      # The @lamsa/* devDependencies are bundled into dist; their workspace: ranges mean nothing on npm.
+      - name: Drop workspace-only fields
+        working-directory: packages/cli
+        run: npm pkg delete devDependencies
+
+      - name: Check the packed CLI runs
+        working-directory: packages/cli
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          mkdir "$RUNNER_TEMP/try" && cd "$RUNNER_TEMP/try"
+          npm init -y > /dev/null
+          npm install "$RUNNER_TEMP"/lamsa-*.tgz
+          test "$(npx lamsa --version)" = "${{ steps.version.outputs.version }}"
+
+      # Skipping a version already on npm makes a re-run, or a release for a hand-published version, safe.
+      - name: Publish to npm
+        working-directory: packages/cli
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if npm view "lamsa@$VERSION" version > /dev/null 2>&1; then
+            echo "::notice::lamsa@$VERSION is already on npm; nothing to publish"
+            exit 0
+          fi
+          npm publish --access public --tag "${{ steps.version.outputs.dist_tag }}"

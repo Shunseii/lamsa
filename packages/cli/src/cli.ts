@@ -9,11 +9,12 @@ import { renderCommand } from "./commands/render.js";
 import { diffCommand } from "./commands/diff.js";
 import { initCommand, migrateCommand, openCommand, schemaCommand, skillCommand } from "./commands/setup.js";
 import { createOutput } from "./output.js";
+import packageJson from "../package.json" with { type: "json" };
 
 const program = new Command()
   .name("lamsa")
   .description("Design files for apps, driven by your own coding agent. Every command is non-interactive.")
-  .version("0.1.0")
+  .version(packageJson.version)
   .option("--json", "machine-readable output")
   .showHelpAfterError();
 

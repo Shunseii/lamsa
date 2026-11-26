@@ -12,6 +12,17 @@ lamsa (لمسة, "a touch") is an open-source, local-first design tool for devel
 
 ![The lamsa editor with a checkout screen open and its pay button selected](docs/screenshots/editor.png)
 
+## Install
+
+The CLI needs Node 22 or later.
+
+```sh
+npm i -g lamsa        # for yourself
+pnpm add -D lamsa     # for a team: pins the version in your repo, so CI and every agent use it
+```
+
+`lamsa render` uses your installed Chrome, or downloads Chromium once on first use.
+
 ```sh
 lamsa init --agent claude --yes       # config, agent skill, AGENTS.md section
 lamsa tokens                          # what your app's CSS defines
@@ -44,7 +55,7 @@ pnpm build
 pnpm test
 ```
 
-To install the `lamsa` CLI and the desktop editor for your user (on Linux: `~/.local/bin`, plus an app-menu entry and icon), run `pnpm --filter @lamsa/desktop install:app`. lamsa isn't published to npm yet, so `npx lamsa` won't work.
+To install the `lamsa` CLI and the desktop editor from this checkout for your user (on Linux: `~/.local/bin`, plus an app-menu entry and icon), run `pnpm --filter @lamsa/desktop install:app`.
 
 MIT licensed.
 
