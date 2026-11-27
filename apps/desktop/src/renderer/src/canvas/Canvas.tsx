@@ -1,7 +1,7 @@
 import type { DesignNode } from "@lamsa/schema";
 import { FileJson, Play } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { insertNodes, newId, reparentMany, setStyle } from "../lib/edits";
 import { ancestorsOf, baseId, childrenOf, fileRegions, isComponent, isLocked, nodeTitle, rootOf, type Model } from "../lib/model";
 import { shortcut } from "../lib/keys";
@@ -159,6 +159,8 @@ function isFlowParent(element: HTMLElement | null): { flow: boolean; axis: "x" |
 export const Canvas = memo(function Canvas() {
   const container = useRef<HTMLDivElement>(null);
   const [, setTick] = useState(0);
+  /** Bumped when a frame changes size, so what is measured from frames is measured again. */
+  const [sizes, setSizes] = useState(0);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [space, setSpace] = useState(false);
   /** The last press was a drag (move, resize, draw…), so its click shouldn't count toward a double-click. */
@@ -198,18 +200,22 @@ export const Canvas = memo(function Canvas() {
   const store = useEditor.getState;
 
   const tokens = snapshot?.tokens;
-  const regions = fileRegions(model, snapshot?.root, (id) => (shadowRoots.get(id)?.host as HTMLElement | undefined)?.offsetWidth);
+  // Measured from the frames, so a pan (which changes none of it) doesn't force a layout or walk every frame again.
+  const { regions, frameBoxes, labelRoom } = useMemo(() => {
+    const regions = fileRegions(model, snapshot?.root, (id) => (shadowRoots.get(id)?.host as HTMLElement | undefined)?.offsetWidth);
+    const frameBoxes = model.roots.flatMap((id) => {
+      const host = shadowRoots.get(id)?.host as HTMLElement | undefined;
+      const node = model.nodes[id];
+      if (!host || !node) return [];
+      const left = (node.x ?? 0) + (regions.get(model.fileOf.get(id) ?? "")?.dx ?? 0);
+      const top = node.y ?? 0;
+      return [{ id, left, top, right: left + host.offsetWidth, bottom: top + host.offsetHeight }];
+    });
+    return { regions, frameBoxes, labelRoom: roomAbove(frameBoxes) };
+  }, [model, snapshot?.root, sizes, renderVersion]);
   const dxOf = (id: string) => regions.get(model.fileOf.get(id) ?? "")?.dx ?? 0;
   const dxOfFile = (file: string) => regions.get(file)?.dx ?? 0;
-  const frameBoxes = model.roots.flatMap((id) => {
-    const host = shadowRoots.get(id)?.host as HTMLElement | undefined;
-    const node = model.nodes[id];
-    if (!host || !node) return [];
-    const left = (node.x ?? 0) + dxOf(id);
-    const top = node.y ?? 0;
-    return [{ id, left, top, right: left + host.offsetWidth, bottom: top + host.offsetHeight }];
-  });
-  const labelRoom = roomAbove(frameBoxes);
+  const widthOf = useMemo(() => new Map(frameBoxes.map((box) => [box.id, box.right - box.left])), [frameBoxes]);
   const { bitmaps, drawingBitmaps } = useFrameBitmaps(useShallow((s) => ({ bitmaps: s.bitmaps, drawingBitmaps: s.drawing })));
   const showsBitmaps = viewport.zoom < BITMAP_ZOOM;
   const preparesBitmaps = viewport.zoom < PREPARE_ZOOM;
@@ -217,7 +223,9 @@ export const Canvas = memo(function Canvas() {
     prepareBitmaps(preparesBitmaps);
     return () => prepareBitmaps(false);
   }, [preparesBitmaps]);
-  const offscreen = offscreenFrames({ boxes: frameBoxes, viewport, canvas: container.current });
+  // A key, so the set stays the same object while the same frames are off screen and a pan step doesn't rebuild the frames.
+  const offscreenKey = [...offscreenFrames({ boxes: frameBoxes, viewport, canvas: container.current })].join(",");
+  const offscreen = useMemo(() => new Set(offscreenKey ? offscreenKey.split(",") : []), [offscreenKey]);
 
   const toScreen = useCallback(
     (rect: DOMRect): Rect => {
@@ -227,14 +235,25 @@ export const Canvas = memo(function Canvas() {
     [],
   );
 
+  /** The view the DOM shows: during a render the new viewport isn't applied yet, so measured rects are from this one. */
+  const committedViewport = useRef(viewport);
+  useLayoutEffect(() => {
+    committedViewport.current = viewport;
+  });
+
   const screenRect = useCallback(
     (displayId: string): Rect | null => {
       const id = baseId(displayId);
       if (!model.nodes[id]) return null;
       const element = findElement(rootOf(model, id), displayId);
-      return element ? toScreen(element.getBoundingClientRect()) : null;
+      if (!element) return null;
+      const rect = toScreen(element.getBoundingClientRect());
+      // Measured in the view the DOM still shows; a pan since then moves everything by the same amount.
+      const shown = committedViewport.current;
+      if (shown.zoom !== viewport.zoom) return rect;
+      return { ...rect, x: rect.x + viewport.x - shown.x, y: rect.y + viewport.y - shown.y };
     },
-    [model, toScreen],
+    [model, toScreen, viewport],
   );
 
   const toWorld = useCallback(
@@ -251,13 +270,14 @@ export const Canvas = memo(function Canvas() {
   useLayoutEffect(() => {
     const frame = requestAnimationFrame(() => setTick((t) => t + 1));
     return () => cancelAnimationFrame(frame);
-  }, [model, viewport, selection, renderVersion, icons, canvasMode, previewProps]);
+    // A pan isn't here: screenRect shifts what it measured by the pan instead of rendering again to measure.
+  }, [model, viewport.zoom, selection, renderVersion, icons, canvasMode, previewProps]);
 
   // Outlines follow frames that change size on their own (variant previews, late-loading fonts).
   useEffect(() => {
     const element = container.current;
     if (!element) return;
-    const observer = new ResizeObserver(() => setTick((t) => t + 1));
+    const observer = new ResizeObserver(() => setSizes((n) => n + 1));
     for (const host of Array.from(element.querySelectorAll(".frame-host"))) observer.observe(host);
     return () => observer.disconnect();
   }, [model]);
@@ -853,11 +873,6 @@ export const Canvas = memo(function Canvas() {
   const cursor =
     drag?.kind === "pan" || tool === "hand" || space ? (drag?.kind === "pan" ? "grabbing" : "grab") : tool === "frame" || tool === "rect" || tool === "comment" ? "crosshair" : tool === "text" ? "text" : "default";
 
-  const frameOffset = (id: string) => {
-    if (drag?.kind === "move-roots" && drag.ids.includes(id)) return drag.delta;
-    return NO_OFFSET;
-  };
-
   /** The top-level frame under the pointer, whose label shows in full. */
   const hoverRoot = hover && model.nodes[baseId(hover)] ? rootOf(model, baseId(hover)) : null;
 
@@ -954,55 +969,44 @@ export const Canvas = memo(function Canvas() {
     );
   }
 
-  if (!tokens) return <div className="canvas" ref={container} />;
-
-  return (
-    <div
-      ref={container}
-      className="canvas"
-      style={{ cursor }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerLeave={() => !drag && store().setHover(null)}
-      onDoubleClick={onDoubleClick}
-      onContextMenu={onContextMenu}
-      data-testid="canvas"
-      data-drawing-bitmaps={drawingBitmaps || undefined}
-    >
-      <CanvasGrid viewport={viewport} />
-      <div className="world" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})` }}>
-        {model.roots.map((id) => {
-          const node = model.nodes[id]!;
-          const offset = frameOffset(id);
-          const editing = !!editingText && rootOf(model, baseId(editingText)) === id;
-          const bitmap = showsBitmaps && !editing ? bitmaps[id] : undefined;
-          return (
-            <div
-              key={id}
-              className={cn("frame-slot", { "shows-bitmap": !!bitmap, "is-offscreen": offscreen.has(id) && !editing && offset === NO_OFFSET })}
-              style={{ left: (node.x ?? 0) + dxOf(id) + offset.x, top: (node.y ?? 0) + offset.y }}
-            >
-              {bitmap && <img className="frame-bitmap" src={bitmap.url} alt="" draggable={false} data-bitmap-for={id} style={{ width: bitmap.width, height: bitmap.height }} />}
-              <FrameView
-                id={id}
-                nodes={model.nodes}
-                childIds={model.children}
-                tokens={tokens}
-                icons={icons}
-                canvasMode={canvasMode}
-                componentProps={previewProps[id]}
-                fileCss={model.fileCss}
-                version={renderVersion}
-                frozen={editing}
-              />
-            </div>
-          );
-        })}
-      </div>
-      {/* Labels sit in screen space, outside the scaled world: a pan only moves this layer and a zoom only moves the
-          labels, so the frames themselves are never repainted while the view moves. */}
-      <div className="canvas-labels" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px)` }}>
+  const movingRoots = drag?.kind === "move-roots" ? drag : null;
+  // Built from what a pan doesn't change, so a pan step re-renders only the transforms and the overlay.
+  const offsetOf = useCallback((id: string) => (movingRoots?.ids.includes(id) ? movingRoots.delta : NO_OFFSET), [movingRoots]);
+  const frames = useMemo(
+    () =>
+      tokens &&
+      model.roots.map((id) => {
+        const node = model.nodes[id]!;
+        const offset = offsetOf(id);
+        const editing = !!editingText && rootOf(model, baseId(editingText)) === id;
+        const bitmap = showsBitmaps && !editing ? bitmaps[id] : undefined;
+        return (
+          <div
+            key={id}
+            className={cn("frame-slot", { "shows-bitmap": !!bitmap, "is-offscreen": offscreen.has(id) && !editing && offset === NO_OFFSET })}
+            style={{ left: (node.x ?? 0) + (regions.get(model.fileOf.get(id) ?? "")?.dx ?? 0) + offset.x, top: (node.y ?? 0) + offset.y }}
+          >
+            {bitmap && <img className="frame-bitmap" src={bitmap.url} alt="" draggable={false} data-bitmap-for={id} style={{ width: bitmap.width, height: bitmap.height }} />}
+            <FrameView
+              id={id}
+              nodes={model.nodes}
+              childIds={model.children}
+              tokens={tokens}
+              icons={icons}
+              canvasMode={canvasMode}
+              componentProps={previewProps[id]}
+              fileCss={model.fileCss}
+              version={renderVersion}
+              frozen={editing}
+            />
+          </div>
+        );
+      }),
+    [model, regions, offsetOf, editingText, showsBitmaps, bitmaps, offscreen, tokens, icons, canvasMode, previewProps, renderVersion],
+  );
+  const labels = useMemo(
+    () => (
+      <>
         {[...regions.values()].map((region) => {
           const screenRoom = Number.isFinite(region.room) ? region.room * viewport.zoom - FILE_LABEL_GAP : undefined;
           return (
@@ -1024,11 +1028,11 @@ export const Canvas = memo(function Canvas() {
         {model.roots.map((id) => {
           const node = model.nodes[id]!;
           if (node.type === "text") return null;
-          const offset = frameOffset(id);
+          const offset = offsetOf(id);
           const declaredWidth = parseFloat(String(node.style?.width ?? ""));
-          const width = (shadowRoots.get(id)?.host as HTMLElement | undefined)?.offsetWidth || (Number.isFinite(declaredWidth) ? declaredWidth : undefined);
+          const width = widthOf.get(id) || (Number.isFinite(declaredWidth) ? declaredWidth : undefined);
           const screenWidth = width === undefined ? undefined : width * viewport.zoom;
-          const left = ((node.x ?? 0) + dxOf(id) + offset.x) * viewport.zoom - LABEL_INSET;
+          const left = ((node.x ?? 0) + (regions.get(model.fileOf.get(id) ?? "")?.dx ?? 0) + offset.x) * viewport.zoom - LABEL_INSET;
           const top = ((node.y ?? 0) + offset.y) * viewport.zoom - LABEL_GAP;
           return (
             <div
@@ -1061,6 +1065,35 @@ export const Canvas = memo(function Canvas() {
                 </div>
           );
         })}
+      </>
+    ),
+    [model, regions, offsetOf, widthOf, labelRoom, selection, hoverRoot, viewport.zoom],
+  );
+
+  if (!tokens) return <div className="canvas" ref={container} />;
+
+  return (
+    <div
+      ref={container}
+      className="canvas"
+      style={{ cursor }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerLeave={() => !drag && store().setHover(null)}
+      onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
+      data-testid="canvas"
+      data-drawing-bitmaps={drawingBitmaps || undefined}
+    >
+      <CanvasGrid viewport={viewport} />
+      <div className="world" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})` }}>
+        {frames}
+      </div>
+      {/* Labels sit in screen space, outside the scaled world: a pan only moves this layer and a zoom only moves the
+          labels, so the frames themselves are never repainted while the view moves. */}
+      <div className="canvas-labels" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px)` }}>
+        {labels}
       </div>
       <div className="overlay">{overlay}</div>
       <CommentLayer />
