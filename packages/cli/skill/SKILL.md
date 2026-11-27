@@ -1,6 +1,6 @@
 ---
 name: lamsa
-description: Design app screens and components as lamsa design files (*.lamsa.json) in this repo, render them to PNG, and implement them in code. Use when asked to design, mock up, or change a screen, page, or component, when a task mentions lamsa or .lamsa.json files, or before implementing UI that has a lamsa design.
+description: Design app screens and components as lamsa design files (*.lamsa.json) in this repo, including motion (transitions, animations, interaction states, screen-to-screen transitions) as real CSS that plays in the editor, render them to PNG, and implement them in code. Use when asked to design, mock up, animate, or change a screen, page, or component, when a task mentions lamsa or .lamsa.json files, or before implementing UI that has a lamsa design.
 ---
 
 # lamsa
@@ -9,6 +9,8 @@ lamsa designs are plain JSON files in this repo (`*.lamsa.json`, see `lamsa.conf
 
 If `lamsa` isn't on PATH, run it from the repo's own install (`pnpm exec lamsa`, `npx lamsa`) or as `npx @lamsa/cli`. Never `npx lamsa` outside a repo that has it installed: the npm package is `@lamsa/cli`, not `lamsa`.
 
+Designs aren't static: motion is real CSS (`@keyframes`, transitions, `data-state` states, view transitions) that plays in the editor's preview. Build animations as CSS, not as rows of still keyframe frames. See **Motion and states** below.
+
 A design is a **spec**, not code. To build a designed screen, read its JSON and its PNG, then implement it with this repo's own framework, components, and tokens.
 
 ## The loop
@@ -16,7 +18,7 @@ A design is a **spec**, not code. To build a designed screen, read its JSON and 
 1. `lamsa tokens` and `lamsa components` to see what exists. Use tokens and components instead of raw values.
 2. Make the change: `lamsa add --tree` for new subtrees, `lamsa move` / `lamsa delete` for structure, direct JSON edits for property tweaks.
 3. `lamsa validate` (exit 1 on errors; each error names the node ID and a fix).
-4. `lamsa render <id|name|file>` and look at the PNG(s) it prints (`.lamsa/render/`). Fix what looks wrong and render again.
+4. `lamsa render <id|name|file>` and look at the PNG(s) it prints (`.lamsa/render/`). Fix what looks wrong and render again. For motion, add `--animate` to get a strip of the frame over time; static renders show animations at their end.
 5. Optional: `lamsa open <file> --select <id>[,<id>…]` shows the result to the user in the desktop editor with those layers selected (any files they're in open too). Never required.
 
 Before starting, and whenever the user says "the comments" or "my notes": `lamsa comments --open --json` lists comment threads people pinned to layers in the editor (each has `nodeId`, `text`, `replies` and `node`, which is null when the layer was deleted). Treat open comments as requests: make the change, validate and render as usual, then resolve each one with a one-line reply saying what you did: `lamsa comments resolve <id> --reply "Pay button is now full width"`. If a comment is unclear or you disagree, reply instead of resolving (`lamsa comments reply <id> "…"`) and leave it open for the user. Never edit or delete comment files by hand.

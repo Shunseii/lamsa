@@ -38,6 +38,7 @@ UI designs live in \`*.lamsa.json\` files (see \`lamsa.config.json\`). They are 
 - Discover: \`lamsa tokens\`, \`lamsa components\`, \`lamsa tree\`.
 - Change: \`lamsa add --tree\`, \`lamsa move\`, \`lamsa delete\`, or edit the JSON directly.
 - Check: \`lamsa validate\`, then \`lamsa render <id|file>\` and look at the PNG.
+- Motion: animations and transitions are real CSS in a node's \`css\` and play in the editor; check them with \`lamsa render <id> --animate\`.
 - The user's selection in the editor: \`lamsa selection --json\`.
 - Comments people pinned to layers: \`lamsa comments --open --json\`; address each, then \`lamsa comments resolve <id> --reply "<what you did>"\`.
 - Every command takes \`--json\`. Full guide: \`lamsa skill\`.
