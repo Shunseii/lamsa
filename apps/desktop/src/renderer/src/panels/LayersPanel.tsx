@@ -349,12 +349,17 @@ function LayersTree() {
    * pinned while the list scrolls sideways. A transform rather than position: sticky, which gives every visible row its own
    * compositor layer and makes each canvas frame rebuild them all.
    */
+  const pinFrame = useRef(0);
   const pinTrails = () => {
-    const scroller = scrollerRef.current;
-    if (!scroller) return;
-    scroller.style.setProperty("--layers-trail-shift", `${scroller.scrollLeft + scroller.clientWidth - scroller.scrollWidth}px`);
+    // Measured in the next frame, after everything else this frame writes, so it never forces an extra layout.
+    pinFrame.current ||= requestAnimationFrame(() => {
+      pinFrame.current = 0;
+      const scroller = scrollerRef.current;
+      if (!scroller) return;
+      scroller.style.setProperty("--layers-trail-shift", `${scroller.scrollLeft + scroller.clientWidth - scroller.scrollWidth}px`);
+    });
   };
-  useLayoutEffect(pinTrails);
+  useEffect(() => () => cancelAnimationFrame(pinFrame.current), []);
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
@@ -509,6 +514,9 @@ function LayersTree() {
     minWidth: contentWidth({ deepest, viewWidth: view.width }),
     ...(view.width > 0 && { "--layers-view-w": `${view.width}px` }),
   } as React.CSSProperties;
+  // The content only gets wider or narrower with the deepest row or the panel's width; scrolling is handled above.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: minWidth is what changes the shift, read from the DOM.
+  useLayoutEffect(pinTrails, [contentStyle.minWidth, view.width]);
 
   return (
     <div ref={scrollerRef} className="panel-body layers-body">

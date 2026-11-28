@@ -69,23 +69,17 @@ export function prepareBitmaps(on: boolean) {
   void drawPending();
 }
 
-/** The pending frame nearest the middle of the canvas, so what's on screen is drawn first. */
-function nextPending(): string {
+/** The pending frames, nearest the middle of the canvas first, so what's on screen is drawn first. Measured once per batch. */
+function pendingByDistance(): string[] {
   const canvas = document.querySelector(".canvas")?.getBoundingClientRect();
-  let best = pending.values().next().value as string;
-  if (!canvas) return best;
+  if (!canvas) return [...pending];
   const middle = { x: canvas.left + canvas.width / 2, y: canvas.top + canvas.height / 2 };
-  let bestDistance = Infinity;
-  for (const id of pending) {
+  const distanceOf = (id: string) => {
     const box = shadowRoots.get(id)?.host.getBoundingClientRect();
-    if (!box) continue;
-    const distance = Math.hypot(Math.max(box.left - middle.x, 0, middle.x - box.right), Math.max(box.top - middle.y, 0, middle.y - box.bottom));
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      best = id;
-    }
-  }
-  return best;
+    if (!box) return Infinity;
+    return Math.hypot(Math.max(box.left - middle.x, 0, middle.x - box.right), Math.max(box.top - middle.y, 0, middle.y - box.bottom));
+  };
+  return [...pending].map((id) => ({ id, distance: distanceOf(id) })).sort((a, b) => a.distance - b.distance).map(({ id }) => id);
 }
 
 async function drawPending() {
@@ -93,9 +87,12 @@ async function drawPending() {
   useFrameBitmaps.setState({ drawing: true });
   try {
     while (preparing && pending.size) {
-      const id = nextPending();
-      pending.delete(id);
-      await draw(id);
+      for (const id of pendingByDistance()) {
+        if (!preparing) break;
+        // Drawn or removed since the batch was ordered.
+        if (!pending.delete(id)) continue;
+        await draw(id);
+      }
     }
   } finally {
     useFrameBitmaps.setState({ drawing: false });
