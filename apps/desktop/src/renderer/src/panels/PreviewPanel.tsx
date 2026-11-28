@@ -1,11 +1,4 @@
-import {
-  applyMotionState,
-  buildRenderTree,
-  emulateReducedMotion,
-  motionLength,
-  motionStatesIn,
-  toHtml,
-} from "@lamsa/renderer";
+import { applyMotionState, buildRenderTree, emulateReducedMotion, toHtml } from "@lamsa/renderer";
 import { Clapperboard, Expand, GripVertical, Maximize2, Minimize2, Minus, Plus, Play, Shrink } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { assetUrl, shadowCss } from "../canvas/FrameView";
@@ -15,12 +8,11 @@ import { ancestorsOf, baseId, nodeTitle, rootOf } from "../lib/model";
 import { useEditor } from "../lib/store";
 import { runCommand } from "../lib/commands";
 import { PreviewFlow, type PreviewFlowHandle } from "./PreviewFlow";
+import { type Bounds, cachedMeasure, type Measured, measureKey, measureLater, measureNow, POINTER_STATES, type Rect, rectIn } from "./previewMeasure";
 import { TransitionEditor } from "./TransitionEditor";
 
 const PAD = 24;
 const SPEEDS = [0.1, 0.25, 1];
-/** Pointer states are played by really hovering or pressing in the preview; they're only measured for the crop. */
-const POINTER_STATES = ["hover", "press", "focus"];
 /** Past this, a moving layer's crop would be mostly empty, so the cell shows the whole frame. */
 const MAX_CROP_GROWTH = 2.5;
 const WHOLE_MAX = { width: 560, height: 320 };
@@ -28,15 +20,12 @@ const WHOLE_MAX_FULLSCREEN = { width: 1200, height: 720 };
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 4;
 const ZOOM_STEP = 1.25;
+/** Up to this many cells are measured while opening, so they appear at their final size; more are measured in the background. */
+const EAGER_CELLS = 4;
+/** How far outside the stage a cell counts as on screen, so it's measured before it's panned into view. */
+const ON_SCREEN_MARGIN = "200px";
 
 const clampZoom = (zoom: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
-
-interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
 
 interface Settings {
   state: string;
@@ -49,101 +38,15 @@ interface Settings {
   fullscreen: boolean;
 }
 
-const union = (all: Rect[]): Rect => {
-  // A state that hides the layer (`display: none`) measures 0×0 at the frame's corner; it adds nothing.
-  const visible = all.filter((r) => r.w > 0 || r.h > 0);
-  const rects = visible.length ? visible : all;
-  const x = Math.min(...rects.map((r) => r.x));
-  const y = Math.min(...rects.map((r) => r.y));
-  return { x, y, w: Math.max(...rects.map((r) => r.x + r.w)) - x, h: Math.max(...rects.map((r) => r.y + r.h)) - y };
-};
-
 function setSpeed(root: ShadowRoot, speed: number) {
   for (const animation of root.getAnimations()) animation.playbackRate = speed;
-}
-
-/** Where `target` travels while its animations run, in the frame's own pixels. Restarts them from 0. */
-function motionBounds(root: ShadowRoot, frame: HTMLElement, target: HTMLElement): Rect {
-  const scale = frame.getBoundingClientRect().width / (frame.offsetWidth || 1) || 1;
-  const rectNow = (): Rect => {
-    const base = frame.getBoundingClientRect();
-    const r = target.getBoundingClientRect();
-    return { x: (r.left - base.left) / scale, y: (r.top - base.top) / scale, w: r.width / scale, h: r.height / scale };
-  };
-  const animations = root.getAnimations();
-  const length = motionLength(root);
-  const rects = [rectNow()];
-  if (length > 0) {
-    for (let i = 0; i <= 12; i++) {
-      for (const animation of animations) {
-        animation.pause();
-        animation.currentTime = (length * i) / 12;
-      }
-      rects.push(rectNow());
-    }
-    for (const animation of animations) {
-      animation.currentTime = 0;
-      animation.play();
-    }
-  }
-  return union(rects);
-}
-
-const rectIn = (frame: HTMLElement, target: HTMLElement): Rect => {
-  const base = frame.getBoundingClientRect();
-  const r = target.getBoundingClientRect();
-  const scale = base.width / (frame.offsetWidth || 1) || 1;
-  return { x: (r.left - base.left) / scale, y: (r.top - base.top) / scale, w: r.width / scale, h: r.height / scale };
-};
-
-interface Bounds {
-  crop: Rect;
-  rest: Rect;
-  frame: { w: number; h: number };
-}
-
-/**
- * Where the layer travels across every state, measured once in a hidden copy so the visible cell
- * never resizes or restarts its animations when the state changes.
- */
-function measureAllStates({ html, id, isRoot }: { html: string; id: string; isRoot: boolean }): { bounds: Bounds; states: string[]; length: number } | null {
-  const container = document.createElement("div");
-  container.style.cssText = "position: fixed; left: -100000px; top: 0; visibility: hidden; pointer-events: none;";
-  document.body.appendChild(container);
-  const root = container.attachShadow({ mode: "open" });
-  const mount = () => {
-    root.innerHTML = html;
-    const frame = root.querySelector<HTMLElement>(".lamsa-surface > [data-node-id]");
-    const target = isRoot ? frame : root.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
-    return frame && target ? { frame, target } : null;
-  };
-  try {
-    const first = mount();
-    if (!first) return null;
-    const own = (first.target.getAttribute("data-lamsa-states") ?? "").split(" ").filter(Boolean);
-    const states = [...new Set([...own, ...motionStatesIn(first.target)])];
-    const length = motionLength(root);
-    const rest = rectIn(first.frame, first.target);
-    const frame = { w: first.frame.offsetWidth, h: first.frame.offsetHeight };
-    const rects = [motionBounds(root, first.frame, first.target)];
-    for (const state of [...POINTER_STATES, ...states]) {
-      const found = mount();
-      if (!found) continue;
-      found.frame.getBoundingClientRect();
-      applyMotionState(root, state, isRoot ? null : found.target);
-      found.frame.getBoundingClientRect();
-      rects.push(motionBounds(root, found.frame, found.target));
-    }
-    return { bounds: { crop: union(rects), rest, frame }, states, length };
-  } finally {
-    container.remove();
-  }
 }
 
 function PreviewCell({
   id,
   settings,
   whole,
+  eager,
   onToggleWhole,
   onReport,
   onDragStart,
@@ -152,6 +55,7 @@ function PreviewCell({
   id: string;
   settings: Settings;
   whole: boolean;
+  eager: boolean;
   onToggleWhole: () => void;
   onReport: (id: string, report: { states: string[]; length: number }) => void;
   onDragStart: () => void;
@@ -175,6 +79,9 @@ function PreviewCell({
   speedRef.current = speed;
   const stateRef = useRef(state);
   const mountedState = useRef(state);
+  const onScreen = useRef(false);
+  const measuring = useRef<{ hurry: () => void } | null>(null);
+  const needsProvisional = useRef(false);
 
   const parts = useCallback(() => {
     const root = host.current?.shadowRoot;
@@ -199,14 +106,28 @@ function PreviewCell({
     });
     const css = reduced ? emulateReducedMotion(result.css) : result.css;
     const html = `<style>${shadowCss(tokens)}\n${css}</style><div class="lamsa-surface ${result.mode}" style="display: inline-block">${toHtml(result.root)}</div>`;
-    const measured = measureAllStates({ html, id, isRoot });
-    setBounds(measured?.bounds ?? null);
+    const apply = (measured: Measured | null) => {
+      needsProvisional.current = false;
+      setBounds(measured?.bounds ?? null);
+      onReport(id, { states: measured?.states ?? [], length: measured?.length ?? 0 });
+    };
+    const subject = { html, id, isRoot };
+    const key = measureKey(subject);
+    const cached = cachedMeasure(key);
+    let later: ReturnType<typeof measureLater> | null = null;
+    if (cached !== undefined) apply(cached);
+    else if (eager) apply(measureNow(subject));
+    else {
+      needsProvisional.current = true;
+      later = measureLater({ ...subject, key, onMeasured: apply });
+      if (onScreen.current) later.hurry();
+    }
+    measuring.current = later;
     root.innerHTML = html;
     const onStart = () => setSpeed(root, speedRef.current);
     root.addEventListener("animationstart", onStart);
     root.addEventListener("transitionrun", onStart);
     setSpeed(root, speedRef.current);
-    onReport(id, { states: measured?.states ?? [], length: measured?.length ?? 0 });
     mountedState.current = "rest";
     // A state other than rest is entered a moment after mounting, so its transition plays.
     let frameId = 0;
@@ -222,11 +143,42 @@ function PreviewCell({
     }
     return () => {
       cancelAnimationFrame(frameId);
+      later?.cancel();
+      measuring.current = null;
       root.removeEventListener("animationstart", onStart);
       root.removeEventListener("transitionrun", onStart);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [generation, rootId, model, tokens, icons, canvasMode, reduced]);
+
+  // Until the background measurement lands, size the cell from its own render at rest. Passive effects
+  // run after every cell's layout effect, so these reads share one layout instead of forcing one per cell.
+  // A whole frame keeps its size across states, so for those this is already the final size.
+  useEffect(() => {
+    if (!needsProvisional.current) return;
+    needsProvisional.current = false;
+    const found = parts();
+    if (!found) return;
+    const rest = rectIn(found.frame, found.target);
+    const frame = { w: found.frame.offsetWidth, h: found.frame.offsetHeight };
+    // A layer's earlier crop is likelier to match its next one than its rest box is, so keep it rather than jump.
+    setBounds((current) => (current && !isRoot ? current : { crop: rest, rest, frame }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generation, rootId, model, tokens, icons, canvasMode, reduced]);
+
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        onScreen.current = entry?.isIntersecting ?? false;
+        if (onScreen.current) measuring.current?.hurry();
+      },
+      { root: element.closest(".preview-stage"), rootMargin: ON_SCREEN_MARGIN },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   // Changing state without a remount plays the transition between the two.
   useLayoutEffect(() => {
@@ -570,6 +522,7 @@ export function PreviewPanel() {
             id={id}
             settings={settings}
             whole={whole.has(id)}
+            eager={order.length <= EAGER_CELLS}
             onToggleWhole={() =>
               setWhole((current) => {
                 const next = new Set(current);
