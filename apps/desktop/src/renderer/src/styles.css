@@ -272,9 +272,10 @@ kbd { font: 11px var(--font-mono); color: var(--color-ink-3); background: var(--
 .layers-body .layer-file { position: sticky; left: 6px; width: calc(var(--layers-view-w, 100%) - 12px); }
 /* Above the rows below it, so its buttons' tooltips aren't covered. */
 .layers-body .layer-file:hover { z-index: 1; }
-/* Pinned to the right while the row scrolls sideways. Its fill runs through the row's right padding (negative margins keep
-   the row's layout) and ::after paints over the list's gutter, so a long name never shows beside or behind the toggles. */
-.layer-trail { position: sticky; right: 6px; display: flex; align-items: center; gap: 6px; flex-shrink: 0; align-self: stretch; padding: 0 8px 0 6px; margin: 0 -8px 0 -6px; border-radius: 0 7px 7px 0; background: var(--row-fill); }
+/* Pinned to the right while the row scrolls sideways, by the shift LayersPanel sets as the list scrolls (not position: sticky,
+   which makes every row a compositor layer). Its fill runs through the row's right padding (negative margins keep the row's
+   layout) and ::after paints over the list's gutter, so a long name never shows beside or behind the toggles. */
+.layer-trail { position: relative; transform: translateX(var(--layers-trail-shift, 0px)); display: flex; align-items: center; gap: 6px; flex-shrink: 0; align-self: stretch; padding: 0 8px 0 6px; margin: 0 -8px 0 -6px; border-radius: 0 7px 7px 0; background: var(--row-fill); }
 .layer-trail::after { content: ""; position: absolute; top: 0; bottom: 0; left: 100%; width: 6px; background: var(--color-surface); }
 /* A name running under the pinned trail fades out instead of being cut mid-letter. */
 .layer-trail::before { content: ""; position: absolute; top: 0; bottom: 0; right: 100%; width: 16px; pointer-events: none; background: linear-gradient(to right, color-mix(in srgb, var(--row-fill) 0%, transparent), var(--row-fill)); }

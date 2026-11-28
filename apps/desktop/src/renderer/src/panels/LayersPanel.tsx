@@ -344,16 +344,31 @@ function LayersTree() {
     const { clientHeight: height, clientWidth: width } = scroller;
     setView((current) => (current.top === top && current.height === height && current.width === width ? current : { top, height, width }));
   };
+  /**
+   * How far the content's right edge is past the visible right edge, which is how far each row's trail moves left to stay
+   * pinned while the list scrolls sideways. A transform rather than position: sticky, which gives every visible row its own
+   * compositor layer and makes each canvas frame rebuild them all.
+   */
+  const pinTrails = () => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    scroller.style.setProperty("--layers-trail-shift", `${scroller.scrollLeft + scroller.clientWidth - scroller.scrollWidth}px`);
+  };
+  useLayoutEffect(pinTrails);
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
     measureView();
-    const observer = new ResizeObserver(measureView);
+    const onScroll = () => {
+      measureView();
+      pinTrails();
+    };
+    const observer = new ResizeObserver(onScroll);
     observer.observe(scroller);
-    scroller.addEventListener("scroll", measureView, { passive: true });
+    scroller.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       observer.disconnect();
-      scroller.removeEventListener("scroll", measureView);
+      scroller.removeEventListener("scroll", onScroll);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
