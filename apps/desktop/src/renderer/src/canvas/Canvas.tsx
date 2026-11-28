@@ -870,8 +870,12 @@ export const Canvas = memo(function Canvas() {
     store().setContextMenu({ x: e.clientX, y: e.clientY });
   };
 
-  const cursor =
-    drag?.kind === "pan" || tool === "hand" || space ? (drag?.kind === "pan" ? "grabbing" : "grab") : tool === "frame" || tool === "rect" || tool === "comment" ? "crosshair" : tool === "text" ? "text" : "default";
+  const panning = drag?.kind === "pan" || tool === "hand" || space;
+  const panCursor = drag?.kind === "pan" ? "grabbing" : "grab";
+  // Cursor is inherited, so changing it on the canvas restyles every layer of every frame (hundreds of ms on a big
+  // project). The pan cursors, which change on every pan and Space press, go on a cover instead; the canvas only
+  // changes cursor when the tool does.
+  const cursor = tool === "frame" || tool === "rect" || tool === "comment" ? "crosshair" : tool === "text" ? "text" : "default";
 
   /** The top-level frame under the pointer, whose label shows in full. */
   const hoverRoot = hover && model.nodes[baseId(hover)] ? rootOf(model, baseId(hover)) : null;
@@ -1103,6 +1107,7 @@ export const Canvas = memo(function Canvas() {
         </div>
       )}
       {model.roots.length === 0 && <EmptyCanvas />}
+      {panning && <div className="pan-cover" style={{ cursor: panCursor }} />}
     </div>
   );
 });

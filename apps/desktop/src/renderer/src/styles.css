@@ -94,6 +94,8 @@ kbd { font: 11px var(--font-mono); color: var(--color-ink-3); background: var(--
 .frame-label-play:hover { background: var(--color-surface-2); color: var(--color-accent); }
 .frame-label:is(.is-hovered, :hover) .frame-label-play, .frame-label-play:focus-visible { opacity: 1; }
 .overlay { position: absolute; inset: 0; pointer-events: none; }
+/* Shows the grab cursors over everything while panning; see Canvas.tsx for why the canvas itself doesn't. */
+.pan-cover { position: absolute; inset: 0; }
 .ov-hover { position: absolute; outline: 2px solid var(--color-accent); outline-offset: 0; opacity: 0.55; }
 .ov-selection { position: absolute; outline: 1.5px solid var(--color-accent); }
 /* Agent changes: held for 1.5s, then a 600ms fade (HIGHLIGHT_HOLD_MS / HIGHLIGHT_FADE_MS in lib/highlights.ts). */
