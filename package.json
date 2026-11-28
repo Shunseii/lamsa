@@ -9,7 +9,7 @@
     "lint:warnings": "biome lint",
     "lint:fix": "biome lint --write",
     "test": "pnpm lint && pnpm build && vitest run",
-    "test:unit": "vitest run tests/core.test.ts tests/renderer.test.ts tests/cli.test.ts",
+    "test:unit": "vitest run tests/core.test.ts tests/renderer.test.ts tests/model.test.ts tests/cli.test.ts",
     "typecheck": "pnpm -r typecheck",
     "desktop": "pnpm --filter @lamsa/desktop dev"
   },

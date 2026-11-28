@@ -89,6 +89,14 @@ interface Context {
 /** Rendering every top-level frame of one node map reuses one index instead of rebuilding it per frame. */
 const childMaps = new WeakMap<Record<string, DesignNode>, Map<string, string[]>>();
 
+/**
+ * Hands the renderer a child index the caller already keeps for `nodes` (each parent's child ids, sorted by `index`),
+ * so rendering doesn't rebuild one from every node after each edit.
+ */
+export function shareChildMap(nodes: Record<string, DesignNode>, children: Map<string, string[]>): void {
+  childMaps.set(nodes, children);
+}
+
 function childMap(nodes: Record<string, DesignNode>): Map<string, string[]> {
   const cached = childMaps.get(nodes);
   if (cached) return cached;

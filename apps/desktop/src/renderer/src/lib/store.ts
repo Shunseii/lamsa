@@ -1,4 +1,4 @@
-import type { CommentThread, TokenMode, TokenSet } from "@lamsa/schema";
+import type { CommentThread, DesignNode, TokenMode, TokenSet } from "@lamsa/schema";
 import { create } from "zustand";
 import {
   isCssChange,
@@ -11,7 +11,7 @@ import {
   type ProjectSnapshot,
 } from "../../../shared/api";
 import { changeHighlights, HIGHLIGHT_MS } from "./highlights";
-import { buildModel, iconNamesIn, rootOf, type Model } from "./model";
+import { buildModel, iconNamesIn, rootOf, updateModel, type Model } from "./model";
 import { activatePanel, DEFAULT_LAYOUT, dockOf, initialShown, movePanel, readLayout, resizeDock, writeLayout, type DockId, type DockShown, type PanelId, type PanelLayout } from "./layout";
 
 declare global {
@@ -128,7 +128,8 @@ interface EditorActions {
   setEditingText(id: string | null): void;
   setPicker(open: boolean): void;
   setContextMenu(menu: { x: number; y: number } | null): void;
-  ensureIcons(): void;
+  /** Loads the icons `nodes` use (every node in the model when left out) that aren't loaded yet. */
+  ensureIcons(nodes?: Iterable<DesignNode>): void;
   /** Shows the Preview tab, playing `ids` (none shows its empty state). */
   openPreview(ids: string[]): void;
   /** Hands the preview's dock back to what it showed before, or hides it. */
@@ -168,21 +169,33 @@ function withRoomForOneMore(toasts: Toast[]): Toast[] {
   return kept;
 }
 
+/** Copies each touched file's node map once per batch, however many of its nodes the batch changes. */
 function applyToFiles(files: Record<string, FileState>, changes: Change[]): Record<string, FileState> {
   const next = { ...files };
+  const copied = new Set<string>();
   for (const change of changes) {
     const file = next[change.file] ?? { path: change.file, nodes: {} };
     if (isCssChange(change)) {
       next[change.file] = { ...file, css: change.css.trim() ? change.css : undefined };
       continue;
     }
-    const nodes = { ...file.nodes };
+    if (!copied.has(change.file)) {
+      next[change.file] = { ...file, nodes: { ...file.nodes } };
+      copied.add(change.file);
+    }
+    const { nodes } = next[change.file]!;
     if (change.node === null) delete nodes[change.id];
     else nodes[change.id] = change.node;
-    next[change.file] = { ...file, nodes };
   }
   return next;
 }
+
+const changedNodeIds = (changes: Change[]) => changes.flatMap((change) => (isCssChange(change) ? [] : [change.id]));
+const changedNodes = (changes: Change[]) => changes.flatMap((change) => (isCssChange(change) || !change.node ? [] : [change.node]));
+
+/** The model after `changes` were applied to `files`, rebuilding only what they touch. */
+const modelAfter = ({ previous, files, changes, open }: { previous: Model; files: Record<string, FileState>; changes: Change[]; open: string[] | null }) =>
+  updateModel({ previous, files, changedIds: changedNodeIds(changes), open });
 
 function inverseOf(files: Record<string, FileState>, changes: Change[]): Change[] {
   const seen = new Set<string>();
@@ -327,11 +340,11 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
       const next = applyToFiles(files, changes);
       set((s) => ({
         files: next,
-        model: buildModel(next, s.openFiles),
+        model: modelAfter({ previous: s.model, files: next, changes, open: s.openFiles }),
         undoStack: [...s.undoStack.slice(-199), { label, changes, inverse }],
         redoStack: [],
       }));
-      get().ensureIcons();
+      get().ensureIcons(changedNodes(changes));
       const errorKey = (issue: ProjectIssue) => `${issue.file}|${issue.nodeId}|${issue.code}|${issue.message}`;
       const before = new Set(get().issues.filter((i) => i.severity === "error").map(errorKey));
       await send(changes);
@@ -352,7 +365,7 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
       const next = applyToFiles(get().files, entry.inverse);
       set((s) => ({
         files: next,
-        model: buildModel(next, s.openFiles),
+        model: modelAfter({ previous: s.model, files: next, changes: entry.inverse, open: s.openFiles }),
         undoStack: s.undoStack.slice(0, -1),
         redoStack: [...s.redoStack, entry],
       }));
@@ -365,7 +378,7 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
       const next = applyToFiles(get().files, entry.changes);
       set((s) => ({
         files: next,
-        model: buildModel(next, s.openFiles),
+        model: modelAfter({ previous: s.model, files: next, changes: entry.changes, open: s.openFiles }),
         redoStack: s.redoStack.slice(0, -1),
         undoStack: [...s.undoStack, entry],
       }));
@@ -376,7 +389,9 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
       const files = { ...get().files, [change.path]: withUnchangedNodesKept({ previous: get().files[change.path], next: change.file, changedIds: change.changedIds }) };
       if (change.file.error === "deleted") delete files[change.path];
       const openFiles = change.open ?? get().openFiles;
-      const model = buildModel(files, openFiles);
+      // A file that just appeared or disappeared may not have been diffed against what this window holds.
+      const sameFile = change.path in get().files && change.path in files;
+      const model = sameFile ? updateModel({ previous: get().model, files, changedIds: change.changedIds, open: openFiles }) : buildModel(files, openFiles);
       const touched = new Set(change.changedIds);
       const cssChanged = (get().files[change.path]?.css ?? "") !== (change.file.css ?? "");
       const keep = (entry: HistoryEntry) => !entry.changes.some((c) => (isCssChange(c) ? cssChanged && c.file === change.path : touched.has(c.id)));
@@ -395,7 +410,7 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
         redoStack: s.redoStack.filter(keep),
         flash,
       }));
-      get().ensureIcons();
+      get().ensureIcons(sameFile ? change.changedIds.flatMap((id) => model.nodes[id] ?? []) : undefined);
       if (change.file.error && change.file.error !== "deleted") {
         get().toast({
           tone: "danger",
@@ -553,8 +568,8 @@ export const useEditor = create<EditorState & EditorActions>((set, get) => {
       }));
     },
 
-    ensureIcons() {
-      const missing = iconNamesIn(get().model.nodes).filter((name) => !(name in get().icons));
+    ensureIcons(nodes) {
+      const missing = iconNamesIn(nodes ?? Object.values(get().model.nodes)).filter((name) => !(name in get().icons));
       if (missing.length === 0) return;
       void api()
         .icons(missing)

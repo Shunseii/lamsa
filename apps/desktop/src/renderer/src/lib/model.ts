@@ -1,3 +1,4 @@
+import { shareChildMap } from "@lamsa/renderer";
 import type { DesignNode } from "@lamsa/schema";
 import type { FileState } from "../../../shared/api";
 
@@ -18,6 +19,38 @@ const byIndex = (nodes: NodeMap) => (a: string, b: string) => {
   return ia < ib ? -1 : ia > ib ? 1 : a < b ? -1 : a > b ? 1 : 0;
 };
 
+interface ModelBasis {
+  open: readonly string[] | null | undefined;
+  /** Nodes whose `parentId` names a node that doesn't exist: neither roots nor anyone's children. */
+  orphans: Set<string>;
+}
+
+/** What `updateModel` needs beyond the model itself, kept out of `Model` so the model stays plain data. */
+const bases = new WeakMap<Model, ModelBasis>();
+
+function rootOrder({ nodes, fileOf }: Pick<Model, "nodes" | "fileOf">) {
+  const order = byIndex(nodes);
+  return (a: string, b: string) => {
+    const fa = fileOf.get(a)!;
+    const fb = fileOf.get(b)!;
+    return fa < fb ? -1 : fa > fb ? 1 : order(a, b);
+  };
+}
+
+function joinFileCss(files: Record<string, FileState>): string {
+  return Object.keys(files)
+    .sort()
+    .map((path) => files[path]!.css ?? "")
+    .filter((css) => css.trim())
+    .join("\n");
+}
+
+function finish({ model, basis }: { model: Model; basis: ModelBasis }): Model {
+  bases.set(model, basis);
+  shareChildMap(model.nodes, model.children);
+  return model;
+}
+
 /**
  * Every file's nodes are indexed (instances need components from files that aren't open), but only
  * frames in `open` files are roots, i.e. shown on the canvas and in the layers list. `null` means the
@@ -36,9 +69,14 @@ export function buildModel(files: Record<string, FileState>, open?: readonly str
   }
   const roots: string[] = [];
   const children = new Map<string, string[]>();
+  const orphans = new Set<string>();
   for (const [id, node] of Object.entries(nodes)) {
-    if (node.parentId === undefined || !nodes[node.parentId]) {
-      if (node.parentId === undefined && (!shown || shown.has(fileOf.get(id)!))) roots.push(id);
+    if (node.parentId === undefined) {
+      if (!shown || shown.has(fileOf.get(id)!)) roots.push(id);
+      continue;
+    }
+    if (!nodes[node.parentId]) {
+      orphans.add(id);
       continue;
     }
     const list = children.get(node.parentId) ?? [];
@@ -47,17 +85,98 @@ export function buildModel(files: Record<string, FileState>, open?: readonly str
   }
   const order = byIndex(nodes);
   for (const list of children.values()) list.sort(order);
-  roots.sort((a, b) => {
-    const fa = fileOf.get(a)!;
-    const fb = fileOf.get(b)!;
-    return fa < fb ? -1 : fa > fb ? 1 : order(a, b);
-  });
-  const fileCss = Object.keys(files)
-    .sort()
-    .map((path) => files[path]!.css ?? "")
-    .filter((css) => css.trim())
-    .join("\n");
-  return { nodes, fileOf, roots, children, fileCss };
+  roots.sort(rootOrder({ nodes, fileOf }));
+  return finish({ model: { nodes, fileOf, roots, children, fileCss: joinFileCss(files) }, basis: { open, orphans } });
+}
+
+function sameOpen(a: readonly string[] | null | undefined, b: readonly string[] | null | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((path, i) => path === b[i]);
+}
+
+/**
+ * The model for `files` when only the nodes in `changedIds` (in any file) were added, edited or removed since
+ * `previous` was built. Same result as `buildModel`, but every node, owner and child list those ids don't
+ * touch is carried over as is, so an edit costs what it changed rather than the size of the project.
+ */
+export function updateModel({
+  previous,
+  files,
+  changedIds,
+  open,
+}: {
+  previous: Model;
+  files: Record<string, FileState>;
+  changedIds: Iterable<string>;
+  open?: readonly string[] | null;
+}): Model {
+  const basis = bases.get(previous);
+  if (!basis || !sameOpen(basis.open, open)) return buildModel(files, open);
+  const changed = new Set(changedIds);
+  if (changed.size === 0) return finish({ model: { ...previous, fileCss: joinFileCss(files) }, basis });
+
+  const paths = Object.keys(files).sort();
+  const nodes: NodeMap = { ...previous.nodes };
+  const fileOf = new Map(previous.fileOf);
+  for (const id of changed) {
+    const owner = paths.find((path) => files[path]!.nodes[id] !== undefined);
+    if (owner === undefined) {
+      delete nodes[id];
+      fileOf.delete(id);
+    } else {
+      nodes[id] = files[owner]!.nodes[id]!;
+      fileOf.set(id, owner);
+    }
+  }
+
+  const children = new Map(previous.children);
+  const orphans = new Set(basis.orphans);
+  const parentsToList = new Set<string>();
+  const appeared = new Set<string>();
+  for (const id of changed) {
+    const before = previous.nodes[id];
+    const after = nodes[id];
+    if (before?.parentId !== undefined) parentsToList.add(before.parentId);
+    if (after?.parentId !== undefined) parentsToList.add(after.parentId);
+    if (before && !after) {
+      for (const kid of previous.children.get(id) ?? []) if (!changed.has(kid)) orphans.add(kid);
+      children.delete(id);
+    }
+    if (!before && after) {
+      appeared.add(id);
+      parentsToList.add(id);
+    }
+    if (after?.parentId !== undefined && !nodes[after.parentId]) orphans.add(id);
+    else orphans.delete(id);
+  }
+  const adopted: string[] = [];
+  if (appeared.size) {
+    for (const id of orphans) {
+      if (!appeared.has(nodes[id]!.parentId!)) continue;
+      orphans.delete(id);
+      adopted.push(id);
+    }
+  }
+
+  const order = byIndex(nodes);
+  const childOf = (parentId: string) => (id: string) => nodes[id]?.parentId === parentId;
+  for (const parentId of parentsToList) {
+    if (!nodes[parentId]) {
+      children.delete(parentId);
+      continue;
+    }
+    const kept = (previous.children.get(parentId) ?? []).filter((id) => !changed.has(id));
+    const list = [...kept, ...[...changed].filter(childOf(parentId)), ...adopted.filter(childOf(parentId))];
+    if (list.length) children.set(parentId, list.sort(order));
+    else children.delete(parentId);
+  }
+
+  const shown = open === undefined ? null : new Set(open ?? []);
+  const isRoot = (id: string) => nodes[id] !== undefined && nodes[id]!.parentId === undefined && (!shown || shown.has(fileOf.get(id)!));
+  const roots = [...previous.roots.filter((id) => !changed.has(id)), ...[...changed].filter(isRoot)];
+  roots.sort(rootOrder({ nodes, fileOf }));
+  return finish({ model: { nodes, fileOf, roots, children, fileCss: joinFileCss(files) }, basis: { open, orphans } });
 }
 
 export function childrenOf(model: Model, id: string): string[] {
@@ -116,20 +235,19 @@ export function isComponent(node: DesignNode | undefined): boolean {
   return node?.type === "frame" && !!node.component;
 }
 
-export function iconNamesIn(nodes: NodeMap): string[] {
+/** Every icon `nodes` can show: icon layers, and icons set by component prop overrides and instance overrides. */
+export function iconNamesIn(nodes: Iterable<DesignNode>): string[] {
   const names = new Set<string>();
-  for (const node of Object.values(nodes)) {
+  for (const node of nodes) {
     if (node.type === "icon") names.add(node.icon);
-  }
-  for (const node of Object.values(nodes)) {
-    if (node.type !== "frame" || !node.component) continue;
-    for (const prop of Object.values(node.component.props ?? {})) {
-      const groups = prop.type === "enum" ? Object.values(prop.overrides ?? {}) : prop.type === "boolean" ? Object.values(prop.overrides ?? {}) : [];
-      for (const patches of groups) for (const patch of Object.values(patches ?? {})) if (patch.icon) names.add(patch.icon);
+    else if (node.type === "frame" && node.component) {
+      for (const prop of Object.values(node.component.props ?? {})) {
+        const groups = prop.type === "enum" ? Object.values(prop.overrides ?? {}) : prop.type === "boolean" ? Object.values(prop.overrides ?? {}) : [];
+        for (const patches of groups) for (const patch of Object.values(patches ?? {})) if (patch.icon) names.add(patch.icon);
+      }
+    } else if (node.type === "instance") {
+      for (const patch of Object.values(node.overrides ?? {})) if (patch.icon) names.add(patch.icon);
     }
-  }
-  for (const node of Object.values(nodes)) {
-    if (node.type === "instance") for (const patch of Object.values(node.overrides ?? {})) if (patch.icon) names.add(patch.icon);
   }
   return [...names];
 }
