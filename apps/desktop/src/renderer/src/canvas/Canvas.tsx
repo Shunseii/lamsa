@@ -118,9 +118,10 @@ function hitTest(clientX: number, clientY: number): string | null {
       if (root) return layerAt({ root, clientX, clientY });
     }
     if (element.classList.contains("frame-host") && element.shadowRoot) {
-      let inner: Element | null = element.shadowRoot.elementFromPoint(clientX, clientY);
-      while (inner && !inner.getAttribute("data-node-id")) inner = inner.parentElement;
-      if (inner) return inner.getAttribute("data-node-id");
+      const shadow = element.shadowRoot;
+      // Past anything drawn over the frame (the cursor covers), to the frame's own topmost layer.
+      const layer = shadow.elementsFromPoint(clientX, clientY).find((inner) => inner.getRootNode() === shadow)?.closest("[data-node-id]");
+      if (layer) return layer.getAttribute("data-node-id");
     }
     if (element.classList.contains("panel") || element.classList.contains("bar")) return null;
   }
@@ -872,10 +873,9 @@ export const Canvas = memo(function Canvas() {
 
   const panning = drag?.kind === "pan" || tool === "hand" || space;
   const panCursor = drag?.kind === "pan" ? "grabbing" : "grab";
-  // Cursor is inherited, so changing it on the canvas restyles every layer of every frame (hundreds of ms on a big
-  // project). The pan cursors, which change on every pan and Space press, go on a cover instead; the canvas only
-  // changes cursor when the tool does.
-  const cursor = tool === "frame" || tool === "rect" || tool === "comment" ? "crosshair" : tool === "text" ? "text" : "default";
+  // Cursor is inherited, so setting it on the canvas would restyle every layer of every frame (hundreds of ms on a big
+  // project). The tool and pan cursors go on covers over the frames instead.
+  const toolCursor = tool === "frame" || tool === "rect" || tool === "comment" ? "crosshair" : tool === "text" ? "text" : undefined;
 
   /** The top-level frame under the pointer, whose label shows in full. */
   const hoverRoot = hover && model.nodes[baseId(hover)] ? rootOf(model, baseId(hover)) : null;
@@ -1080,7 +1080,6 @@ export const Canvas = memo(function Canvas() {
     <div
       ref={container}
       className="canvas"
-      style={{ cursor }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -1099,6 +1098,9 @@ export const Canvas = memo(function Canvas() {
       <div className="canvas-labels" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px)` }}>
         {labels}
       </div>
+      {/* Under the selection handles and comment pins, which stay clickable; the tools find layers with elementsFromPoint,
+          which sees through it. */}
+      {toolCursor && <div className="cursor-cover" style={{ cursor: toolCursor }} />}
       <div className="overlay">{overlay}</div>
       <CommentLayer />
       {agentCursor && (
@@ -1107,7 +1109,7 @@ export const Canvas = memo(function Canvas() {
         </div>
       )}
       {model.roots.length === 0 && <EmptyCanvas />}
-      {panning && <div className="pan-cover" style={{ cursor: panCursor }} />}
+      {panning && <div className="cursor-cover" style={{ cursor: panCursor }} />}
     </div>
   );
 });

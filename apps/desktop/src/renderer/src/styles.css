@@ -94,8 +94,8 @@ kbd { font: 11px var(--font-mono); color: var(--color-ink-3); background: var(--
 .frame-label-play:hover { background: var(--color-surface-2); color: var(--color-accent); }
 .frame-label:is(.is-hovered, :hover) .frame-label-play, .frame-label-play:focus-visible { opacity: 1; }
 .overlay { position: absolute; inset: 0; pointer-events: none; }
-/* Shows the grab cursors over everything while panning; see Canvas.tsx for why the canvas itself doesn't. */
-.pan-cover { position: absolute; inset: 0; }
+/* Shows the tool and pan cursors over the frames; see Canvas.tsx for why the canvas itself doesn't. */
+.cursor-cover { position: absolute; inset: 0; }
 .ov-hover { position: absolute; outline: 2px solid var(--color-accent); outline-offset: 0; opacity: 0.55; }
 .ov-selection { position: absolute; outline: 1.5px solid var(--color-accent); }
 /* Agent changes: held for 1.5s, then a 600ms fade (HIGHLIGHT_HOLD_MS / HIGHLIGHT_FADE_MS in lib/highlights.ts). */
@@ -366,9 +366,10 @@ kbd { font: 11px var(--font-mono); color: var(--color-ink-3); background: var(--
 .panel-resize-centre::after { top: 0; bottom: auto; left: 14px; right: 14px; width: auto; height: 2px; }
 .panel-resize-readout { position: fixed; z-index: 70; display: flex; align-items: center; gap: 6px; background: var(--color-surface); border: 1px solid var(--color-line); box-shadow: var(--shadow-panel); border-radius: 8px; padding: 4px 8px; font-size: 12px; white-space: nowrap; pointer-events: none; }
 /* Edges follow the pointer while resizing instead of easing after it. */
-.editor.is-resizing, .editor.is-resizing * { cursor: ew-resize !important; user-select: none; }
-.editor.is-resizing-rows, .editor.is-resizing-rows * { cursor: ns-resize !important; user-select: none; }
 .editor:is(.is-resizing, .is-resizing-rows) :is(.panel, .toasts) { transition: none; }
+/* Holds the resize cursor over the whole window while dragging a panel edge. A cursor set on the editor would be inherited
+   by every layer of every frame on the canvas and restyle them all. */
+.resize-cover { position: fixed; inset: 0; z-index: 69; user-select: none; }
 .preview-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--color-line); }
 .preview-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background-color: var(--color-bg); background-image: radial-gradient(circle, rgba(26, 25, 23, 0.09) 1px, transparent 1px); background-size: 20px 20px; user-select: none; }
 .preview-stage.is-panning, .preview-stage.is-panning * { cursor: grabbing !important; }

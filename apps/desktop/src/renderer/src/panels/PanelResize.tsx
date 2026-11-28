@@ -63,6 +63,10 @@ export function DockResize({ dock }: { dock: DockId }) {
     const live = liveSizeStyle(dock);
     let size: number | null = null;
     editor?.classList.add(vertical ? "is-resizing-rows" : "is-resizing");
+    const cover = document.createElement("div");
+    cover.className = "resize-cover";
+    cover.style.cursor = vertical ? "ns-resize" : "ew-resize";
+    document.body.append(cover);
     const move = (event: PointerEvent) => {
       size = clampDockSize({ dock, size: startSize + direction * ((vertical ? event.clientY : event.clientX) - startPoint) });
       live.set(size);
@@ -70,6 +74,7 @@ export function DockResize({ dock }: { dock: DockId }) {
     };
     const up = () => {
       editor?.classList.remove("is-resizing", "is-resizing-rows");
+      cover.remove();
       if (size !== null) setDockSize({ dock, size });
       live.remove();
       setReadout(null);
